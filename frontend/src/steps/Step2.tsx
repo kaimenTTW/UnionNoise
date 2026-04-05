@@ -1,16 +1,19 @@
 import { fabric } from 'fabric'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
+import { usePdfRenderer } from '../hooks/usePdfRenderer'
 import { useStepGuard } from '../hooks/useStepGuard'
 import { useProjectStore } from '../store/projectStore'
 import type { SegmentRow } from '../types'
 
-const CANVAS_W = 720
-const CANVAS_H = 520
+const CANVAS_W = 740
+const CANVAS_H = 540
 const CAL_COLOR = '#f59e0b'
 const LINE_COLOR = '#3b82f6'
 const DOT_COLOR = '#22c55e'
 const TAG_OPTIONS: SegmentRow['tag'][] = ['Standard', 'Corner', 'Gate', 'End']
+const MIN_ZOOM = 0.3
+const MAX_ZOOM = 10
 
 function pixelDist(a: { x: number; y: number }, b: { x: number; y: number }) {
   return Math.sqrt((b.x - a.x) ** 2 + (b.y - a.y) ** 2)
@@ -23,12 +26,26 @@ export default function Step2() {
   const { site_data, setSiteData, setCalibration, setAlignmentPoints, updateSegmentTag, confirmStep2 } =
     useProjectStore()
 
-  // File input ref — triggered programmatically so no browser compat issues
   const fileInputRef = useRef<HTMLInputElement>(null)
+  const [selectedFile, setSelectedFile] = useState<File | null>(null)
+  const isPdf = selectedFile?.type === 'application/pdf'
 
-  // Fabric mounts into this div imperatively — React never owns children here
+  // PDF.js renders first page → data URL
+  const pdf = usePdfRenderer(isPdf ? selectedFile : null, 2)
+
+  // The resolved data URL: from PDF.js for PDFs, from FileReader for images
+  const [imageDataUrl, setImageDataUrl] = useState<string | null>(null)
+
+  // When a PDF finishes rendering, use its data URL
+  useEffect(() => {
+    if (pdf.dataUrl) setImageDataUrl(pdf.dataUrl)
+  }, [pdf.dataUrl])
+
+  // Fabric owns this div entirely — React never renders children inside it
   const fabricContainerRef = useRef<HTMLDivElement>(null)
   const fabricRef = useRef<fabric.Canvas | null>(null)
+  const bgImageRef = useRef<fabric.Image | null>(null)
+  const [fabricReady, setFabricReady] = useState(false)
   const [fabricError, setFabricError] = useState<string | null>(null)
 
   const [mode, setMode] = useState<'idle' | 'calibrating' | 'drawing'>('idle')
@@ -41,20 +58,19 @@ export default function Step2() {
   const lineObjectsRef = useRef<fabric.Line[]>([])
   const dotObjectsRef = useRef<fabric.Circle[]>([])
 
-  // Refs so the mouse handler always sees current values without re-registering
+  // Refs for stable mouse handler
   const modeRef = useRef(mode)
   const calClickCountRef = useRef(calClickCount)
   const knownDistanceRef = useRef(knownDistance)
   const alignmentPointsRef = useRef(site_data.alignment_points)
   const calPointsRef = useRef(calPoints)
-
   useEffect(() => { modeRef.current = mode }, [mode])
   useEffect(() => { calClickCountRef.current = calClickCount }, [calClickCount])
   useEffect(() => { knownDistanceRef.current = knownDistance }, [knownDistance])
   useEffect(() => { alignmentPointsRef.current = site_data.alignment_points }, [site_data.alignment_points])
   useEffect(() => { calPointsRef.current = calPoints }, [calPoints])
 
-  // ── Initialise Fabric ───────────────────────────────────────────────────────
+  // ── Init Fabric ───────────────────────────────────────────────────────────
 
   useEffect(() => {
     const container = fabricContainerRef.current
@@ -68,27 +84,125 @@ export default function Step2() {
         width: CANVAS_W,
         height: CANVAS_H,
         selection: false,
-        backgroundColor: 'rgba(0,0,0,0)',
+        backgroundColor: '#18181b',
       })
       fabricRef.current = fc
+      setFabricReady(true)
     } catch (e) {
       setFabricError(String(e))
+      return
     }
+
+    // ── Zoom: mouse wheel ─────────────────────────────────────────────────
+    fc.on('mouse:wheel', (opt) => {
+      const delta = (opt.e as WheelEvent).deltaY
+      let zoom = fc!.getZoom()
+      zoom *= 0.999 ** delta
+      zoom = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, zoom))
+      fc!.zoomToPoint({ x: opt.e.offsetX, y: opt.e.offsetY }, zoom)
+      opt.e.preventDefault()
+      opt.e.stopPropagation()
+    })
+
+    // ── Pan: alt + drag ───────────────────────────────────────────────────
+    let isPanning = false
+    let lastPos = { x: 0, y: 0 }
+
+    fc.on('mouse:down', (opt) => {
+      if (opt.e.altKey) {
+        isPanning = true
+        fc!.defaultCursor = 'grabbing'
+        lastPos = { x: opt.e.clientX, y: opt.e.clientY }
+        opt.e.preventDefault()
+      }
+    })
+
+    fc.on('mouse:move', (opt) => {
+      if (!isPanning) return
+      const dx = opt.e.clientX - lastPos.x
+      const dy = opt.e.clientY - lastPos.y
+      const vpt = fc!.viewportTransform
+      if (vpt) {
+        vpt[4] += dx
+        vpt[5] += dy
+        fc!.requestRenderAll()
+      }
+      lastPos = { x: opt.e.clientX, y: opt.e.clientY }
+      opt.e.preventDefault()
+    })
+
+    fc.on('mouse:up', () => {
+      isPanning = false
+      fc!.defaultCursor = modeRef.current === 'idle' ? 'default' : 'crosshair'
+    })
 
     return () => {
       try { fc?.dispose() } catch { /* ignore */ }
       fabricRef.current = null
+      setFabricReady(false)
       while (container.firstChild) container.removeChild(container.firstChild)
     }
   }, [])
 
-  // ── Mouse handler ────────────────────────────────────────────────────────────
+  // ── Load image into Fabric as background when data URL is ready ───────────
 
   useEffect(() => {
     const fc = fabricRef.current
+    if (!fc || !imageDataUrl) return
+
+    const imgEl = new Image()
+    imgEl.onload = () => {
+      const fc2 = fabricRef.current
+      if (!fc2) return
+
+      // Remove old background
+      if (bgImageRef.current) {
+        fc2.remove(bgImageRef.current)
+        bgImageRef.current = null
+      }
+
+      // Fit image to canvas, centred
+      const scale = Math.min(CANVAS_W / imgEl.naturalWidth, CANVAS_H / imgEl.naturalHeight)
+      const left = (CANVAS_W - imgEl.naturalWidth * scale) / 2
+      const top = (CANVAS_H - imgEl.naturalHeight * scale) / 2
+
+      const fabricImg = new fabric.Image(imgEl, {
+        left,
+        top,
+        scaleX: scale,
+        scaleY: scale,
+        selectable: false,
+        evented: false,
+        lockMovementX: true,
+        lockMovementY: true,
+      })
+      fc2.add(fabricImg)
+      fc2.sendToBack(fabricImg)
+      bgImageRef.current = fabricImg
+      fc2.requestRenderAll()
+    }
+    imgEl.src = imageDataUrl
+  }, [imageDataUrl])
+
+  // ── Reset zoom/pan to fit ─────────────────────────────────────────────────
+
+  const resetView = () => {
+    const fc = fabricRef.current
     if (!fc) return
+    fc.setViewportTransform([1, 0, 0, 1, 0, 0])
+    fc.requestRenderAll()
+  }
+
+  // ── Click handler: calibration + drawing ─────────────────────────────────
+
+  useEffect(() => {
+    const fc = fabricRef.current
+    if (!fc || !fabricReady) return
 
     const onMouseDown = (opt: fabric.IEvent<MouseEvent>) => {
+      if (opt.e.altKey) return // panning — ignore
+
+      // getPointer accounts for current viewport transform (zoom/pan)
       const pointer = fc.getPointer(opt.e)
       const pt = { x: Math.round(pointer.x), y: Math.round(pointer.y) }
 
@@ -99,7 +213,10 @@ export default function Step2() {
         setCalPoints(next)
         setCalClickCount(count + 1)
 
-        const dot = new fabric.Circle({ left: pt.x - 5, top: pt.y - 5, radius: 5, fill: CAL_COLOR, selectable: false, evented: false })
+        const dot = new fabric.Circle({
+          left: pt.x - 5, top: pt.y - 5, radius: 5,
+          fill: CAL_COLOR, selectable: false, evented: false,
+        })
         fc.add(dot)
         setCalDotObjects((d) => [...d, dot])
 
@@ -107,7 +224,10 @@ export default function Step2() {
           const dist = parseFloat(knownDistanceRef.current)
           if (dist > 0) {
             const px_per_m = pixelDist(next[0], next[1]) / dist
-            const line = new fabric.Line([next[0].x, next[0].y, next[1].x, next[1].y], { stroke: CAL_COLOR, strokeWidth: 1.5, strokeDashArray: [4, 4], selectable: false, evented: false })
+            const line = new fabric.Line(
+              [next[0].x, next[0].y, next[1].x, next[1].y],
+              { stroke: CAL_COLOR, strokeWidth: 1.5, strokeDashArray: [4, 4], selectable: false, evented: false },
+            )
             fc.add(line)
             setCalLineObject(line)
             setCalibration({ point_a: next[0], point_b: next[1], known_distance: dist, px_per_m })
@@ -121,15 +241,17 @@ export default function Step2() {
 
     fc.on('mouse:down', onMouseDown)
     return () => { fc.off('mouse:down', onMouseDown) }
-  }, [setCalibration, setAlignmentPoints])
+  }, [fabricReady, setCalibration, setAlignmentPoints])
 
-  // ── Cursor ───────────────────────────────────────────────────────────────────
+  // ── Cursor ────────────────────────────────────────────────────────────────
 
   useEffect(() => {
-    if (fabricRef.current) fabricRef.current.defaultCursor = mode === 'idle' ? 'default' : 'crosshair'
+    const fc = fabricRef.current
+    if (!fc) return
+    fc.defaultCursor = mode === 'idle' ? 'default' : 'crosshair'
   }, [mode])
 
-  // ── Redraw polyline ──────────────────────────────────────────────────────────
+  // ── Redraw polyline ───────────────────────────────────────────────────────
 
   const redrawPolyline = useCallback((points: Array<{ x: number; y: number }>) => {
     const fc = fabricRef.current
@@ -139,21 +261,60 @@ export default function Step2() {
     lineObjectsRef.current = []
     dotObjectsRef.current = []
     for (let i = 0; i < points.length - 1; i++) {
-      const ln = new fabric.Line([points[i].x, points[i].y, points[i + 1].x, points[i + 1].y], { stroke: LINE_COLOR, strokeWidth: 2, selectable: false, evented: false })
+      const ln = new fabric.Line(
+        [points[i].x, points[i].y, points[i + 1].x, points[i + 1].y],
+        { stroke: LINE_COLOR, strokeWidth: 2, selectable: false, evented: false },
+      )
       fc.add(ln)
       lineObjectsRef.current.push(ln)
     }
     points.forEach((p) => {
-      const d = new fabric.Circle({ left: p.x - 4, top: p.y - 4, radius: 4, fill: DOT_COLOR, selectable: false, evented: false })
+      const d = new fabric.Circle({
+        left: p.x - 4, top: p.y - 4, radius: 4,
+        fill: DOT_COLOR, selectable: false, evented: false,
+      })
       fc.add(d)
       dotObjectsRef.current.push(d)
     })
-    fc.renderAll()
+    fc.requestRenderAll()
   }, [])
 
   useEffect(() => { redrawPolyline(site_data.alignment_points) }, [site_data.alignment_points, redrawPolyline])
 
-  // ── Actions ──────────────────────────────────────────────────────────────────
+  // ── File selection ────────────────────────────────────────────────────────
+
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+    setSelectedFile(file)
+    setSiteData({ site_plan_filename: file.name })
+
+    if (file.type !== 'application/pdf') {
+      // Images: read to data URL immediately
+      const reader = new FileReader()
+      reader.onload = (ev) => {
+        const url = ev.target?.result as string
+        setImageDataUrl(url)
+        setSiteData({ site_plan_image: url, site_plan_filename: file.name })
+      }
+      reader.readAsDataURL(file)
+    } else {
+      // PDF: usePdfRenderer hook handles rendering; update store filename now
+      setSiteData({ site_plan_image: null, site_plan_filename: file.name })
+      setImageDataUrl(null) // cleared; will be set when pdf.dataUrl arrives
+    }
+    e.target.value = ''
+  }
+
+  // Sync PDF data URL into store and local state once rendered
+  useEffect(() => {
+    if (pdf.dataUrl) {
+      setImageDataUrl(pdf.dataUrl)
+      setSiteData({ site_plan_image: pdf.dataUrl })
+    }
+  }, [pdf.dataUrl, setSiteData])
+
+  // ── Calibration / drawing actions ────────────────────────────────────────
 
   const handleStartCalibration = () => {
     const dist = parseFloat(knownDistance)
@@ -162,7 +323,7 @@ export default function Step2() {
     if (fc) {
       calDotObjects.forEach((o) => fc.remove(o))
       if (calLineObject) fc.remove(calLineObject)
-      fc.renderAll()
+      fc.requestRenderAll()
     }
     setCalDotObjects([])
     setCalLineObject(null)
@@ -184,16 +345,8 @@ export default function Step2() {
       dotObjectsRef.current.forEach((o) => fc.remove(o))
       lineObjectsRef.current = []
       dotObjectsRef.current = []
-      fc.renderAll()
+      fc.requestRenderAll()
     }
-  }
-
-  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0]
-    if (!file) return
-    setSiteData({ site_plan_image: URL.createObjectURL(file), site_plan_filename: file.name })
-    // Reset input value so the same file can be re-selected
-    e.target.value = ''
   }
 
   const handleConfirm = () => { confirmStep2(); navigate('/step/3') }
@@ -201,6 +354,7 @@ export default function Step2() {
   const canConfirm = site_data.calibration.px_per_m !== null && site_data.segment_table.length >= 1
   const { px_per_m } = site_data.calibration
   const totalLength = site_data.segment_table.reduce((s, r) => s + r.length_m, 0)
+  const isLoading = pdf.loading
 
   return (
     <div className="flex h-full flex-col">
@@ -214,16 +368,12 @@ export default function Step2() {
 
       <div className="flex flex-1 overflow-hidden">
         {/* Left */}
-        <div className="flex w-[60%] shrink-0 flex-col gap-4 overflow-y-auto border-r border-border p-5">
+        <div className="flex w-[62%] shrink-0 flex-col gap-4 overflow-y-auto border-r border-border p-5">
 
-          {/* Upload button — triggers hidden input programmatically */}
+          {/* Upload row */}
           <div className="flex items-center gap-3">
-            <button
-              type="button"
-              className="btn-secondary"
-              onClick={() => fileInputRef.current?.click()}
-            >
-              {site_data.site_plan_image ? 'Change Site Plan' : 'Upload Site Plan'}
+            <button type="button" className="btn-secondary" onClick={() => fileInputRef.current?.click()}>
+              {site_data.site_plan_filename ? 'Change Site Plan' : 'Upload Site Plan'}
             </button>
             <input
               ref={fileInputRef}
@@ -235,43 +385,42 @@ export default function Step2() {
             {site_data.site_plan_filename && (
               <span className="truncate max-w-xs text-sm text-muted">{site_data.site_plan_filename}</span>
             )}
+            {isLoading && <span className="text-xs text-warning">Rendering PDF…</span>}
+            {pdf.error && <span className="text-xs text-danger">PDF error: {pdf.error}</span>}
           </div>
 
-          {/* Canvas area */}
+          {/* Hint */}
+          <p className="text-xs text-muted -mt-2">
+            Scroll to zoom · Alt + drag to pan · <button type="button" className="underline hover:text-white" onClick={resetView}>Reset view</button>
+          </p>
+
+          {/* Canvas — Fabric owns everything inside fabricContainerRef */}
           <div
-            className="relative rounded-lg border border-border bg-zinc-900 overflow-hidden"
-            style={{ width: CANVAS_W, height: CANVAS_H, flexShrink: 0 }}
+            className="rounded-lg border border-border overflow-hidden"
+            style={{ width: CANVAS_W, height: CANVAS_H, flexShrink: 0, position: 'relative' }}
           >
-            {/* Image/PDF layer — rendered behind the Fabric drawing overlay */}
-            {site_data.site_plan_image ? (
-              site_data.site_plan_filename?.toLowerCase().endsWith('.pdf') ? (
-                <object
-                  data={site_data.site_plan_image}
-                  type="application/pdf"
-                  style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', zIndex: 0, pointerEvents: 'none' }}
-                />
-              ) : (
-                <img
-                  src={site_data.site_plan_image}
-                  alt="Site plan"
-                  style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'contain', zIndex: 0, pointerEvents: 'none' }}
-                />
-              )
-            ) : (
-              <div style={{ position: 'absolute', inset: 0, zIndex: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}
-                className="text-muted text-sm">
+            <div ref={fabricContainerRef} style={{ width: CANVAS_W, height: CANVAS_H }} />
+
+            {/* Overlay shown before any file is loaded */}
+            {!imageDataUrl && !isLoading && (
+              <div
+                style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', pointerEvents: 'none' }}
+                className="text-muted text-sm"
+              >
                 Upload a site plan to begin
               </div>
             )}
-
-            {/* Fabric drawing layer — React never renders children here */}
-            <div
-              ref={fabricContainerRef}
-              style={{ position: 'absolute', inset: 0, zIndex: 1 }}
-            />
-
+            {isLoading && (
+              <div
+                style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', pointerEvents: 'none' }}
+                className="text-muted text-sm gap-2 flex"
+              >
+                <span className="inline-block h-4 w-4 animate-spin rounded-full border-2 border-muted/30 border-t-muted" />
+                Rendering PDF…
+              </div>
+            )}
             {fabricError && (
-              <div style={{ position: 'absolute', inset: 0, zIndex: 2, display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+              <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}
                 className="bg-danger/20 text-danger text-xs p-4 text-center">
                 Canvas error: {fabricError}
               </div>
@@ -287,12 +436,9 @@ export default function Step2() {
                 <input type="number" min={0.1} step={0.1} className="field-input" value={knownDistance}
                   onChange={(e) => setKnownDistance(e.target.value)} placeholder="e.g. 10" />
               </div>
-              <button
-                type="button"
-                onClick={handleStartCalibration}
+              <button type="button" onClick={handleStartCalibration}
                 disabled={!knownDistance || parseFloat(knownDistance) <= 0 || mode === 'drawing'}
-                className={['btn-secondary whitespace-nowrap', mode === 'calibrating' ? 'border-warning text-warning' : ''].join(' ')}
-              >
+                className={['btn-secondary whitespace-nowrap', mode === 'calibrating' ? 'border-warning text-warning' : ''].join(' ')}>
                 {mode === 'calibrating' ? (calClickCount === 0 ? 'Click point A…' : 'Click point B…') : 'Click Two Points'}
               </button>
             </div>
@@ -309,7 +455,7 @@ export default function Step2() {
             )}
           </div>
 
-          {/* Drawing controls */}
+          {/* Drawing */}
           <div className="panel space-y-3">
             <p className="text-xs font-semibold uppercase tracking-wide text-muted">Barrier Digitisation</p>
             <div className="flex flex-wrap gap-2">
