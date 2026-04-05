@@ -1,0 +1,89 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  * {
+    box-sizing: border-box;
+  }
+
+  html,
+  body,
+  #root {
+    height: 100%;
+    margin: 0;
+    padding: 0;
+  }
+
+  body {
+    background-color: #0f1117;
+    color: #f9fafb;
+    font-family: 'Inter', sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  ::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+
+  ::-webkit-scrollbar-track {
+    background: #1a1d27;
+  }
+
+  ::-webkit-scrollbar-thumb {
+    background: #2a2d3a;
+    border-radius: 3px;
+  }
+}
+
+@layer components {
+  .step-header {
+    @apply border-b border-border px-8 py-6;
+  }
+
+  .step-title {
+    @apply text-xl font-semibold text-white;
+  }
+
+  .step-subtitle {
+    @apply mt-1 text-sm text-muted;
+  }
+
+  .panel {
+    @apply rounded-lg border border-border bg-panel p-5;
+  }
+
+  .field-label {
+    @apply block text-xs font-semibold uppercase tracking-wide text-muted mb-1.5;
+  }
+
+  .field-input {
+    @apply w-full rounded border border-border bg-surface px-3 py-2 text-sm text-white
+      placeholder:text-muted/50 focus:border-accent focus:outline-none focus:ring-1 focus:ring-accent
+      transition-colors;
+  }
+
+  .btn-primary {
+    @apply rounded bg-accent px-4 py-2 text-sm font-semibold text-white
+      hover:bg-accent/90 disabled:cursor-not-allowed disabled:opacity-40 transition-colors;
+  }
+
+  .btn-secondary {
+    @apply rounded border border-border px-4 py-2 text-sm font-semibold text-muted
+      hover:border-white/30 hover:text-white disabled:cursor-not-allowed disabled:opacity-40 transition-colors;
+  }
+
+  .btn-success {
+    @apply rounded bg-success px-4 py-2 text-sm font-semibold text-white
+      hover:bg-success/90 disabled:cursor-not-allowed disabled:opacity-40 transition-colors;
+  }
+
+  .badge-warning {
+    @apply inline-flex items-center rounded-full bg-warning/10 px-2 py-0.5 text-xs font-medium text-warning;
+  }
+
+  .badge-success {
+    @apply inline-flex items-center rounded-full bg-success/10 px-2 py-0.5 text-xs font-medium text-success;
+  }
+}
