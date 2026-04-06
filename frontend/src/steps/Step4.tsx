@@ -1,9 +1,10 @@
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, useParams } from 'react-router-dom'
 import { useStepGuard } from '../hooks/useStepGuard'
 
 export default function Step4() {
   useStepGuard(4)
   const navigate = useNavigate()
+  const { id } = useParams<{ id: string }>()
 
   return (
     <div className="flex h-full flex-col">
@@ -31,7 +32,7 @@ export default function Step4() {
       </div>
 
       <div className="flex justify-end border-t border-border px-6 py-4">
-        <button onClick={() => navigate('/step/5')} className="btn-primary">
+        <button onClick={() => navigate(`/project/${id}/step/5`)} className="btn-primary">
           Continue →
         </button>
       </div>

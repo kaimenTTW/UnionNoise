@@ -23,6 +23,7 @@ export default function Step6() {
   const { project_info: pi, site_data: sd } = useProjectStore()
 
   const totalLength = sd.segment_table.reduce((s, r) => s + r.length_m, 0)
+  const totalVertices = sd.polylines.reduce((s, p) => s + p.points.length, 0)
 
   return (
     <div className="flex h-full flex-col">
@@ -82,7 +83,8 @@ export default function Step6() {
                   label="Calibration distance"
                   value={sd.calibration.known_distance !== null ? `${sd.calibration.known_distance} m` : null}
                 />
-                <SummaryRow label="Vertices" value={sd.alignment_points.length} />
+                <SummaryRow label="Alignments" value={sd.polylines.length} />
+                <SummaryRow label="Vertices" value={totalVertices} />
                 <SummaryRow label="Segments" value={sd.segment_table.length} />
                 <SummaryRow
                   label="Total barrier length"
@@ -105,6 +107,7 @@ export default function Step6() {
               <table className="w-full text-sm">
                 <thead>
                   <tr className="border-b border-border text-xs font-semibold uppercase tracking-wide text-muted">
+                    <th className="pb-2 text-left">Align</th>
                     <th className="pb-2 text-left">ID</th>
                     <th className="pb-2 text-right">Length (m)</th>
                     <th className="pb-2 text-left pl-4">Tag</th>
@@ -112,8 +115,9 @@ export default function Step6() {
                 </thead>
                 <tbody>
                   {sd.segment_table.map((row) => (
-                    <tr key={row.id} className="border-b border-border/40">
-                      <td className="py-2 font-mono font-semibold text-accent">{row.id}</td>
+                    <tr key={`${row.alignment_id}-${row.segment_id}`} className="border-b border-border/40">
+                      <td className="py-2 font-mono text-muted">{row.alignment_id}</td>
+                      <td className="py-2 font-mono font-semibold text-accent">{row.segment_id}</td>
                       <td className="py-2 text-right font-mono">{row.length_m.toFixed(2)}</td>
                       <td className="py-2 pl-4 text-muted">{row.tag}</td>
                     </tr>

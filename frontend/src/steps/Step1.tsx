@@ -1,6 +1,6 @@
 import { useMutation } from '@tanstack/react-query'
 import { useRef, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, useParams } from 'react-router-dom'
 import { extractFromFile, extractFromText } from '../api/extract'
 import { useStepGuard } from '../hooks/useStepGuard'
 import {
@@ -38,6 +38,7 @@ function FieldRow({
 export default function Step1() {
   useStepGuard(1)
   const navigate = useNavigate()
+  const { id } = useParams<{ id: string }>()
 
   const { project_info, setProjectInfo, confirmStep1 } = useProjectStore()
   const step1Ready = useStep1Ready()
@@ -100,7 +101,7 @@ export default function Step1() {
 
   const handleConfirm = () => {
     confirmStep1()
-    navigate('/step/2')
+    navigate(`/project/${id}/step/2`)
   }
 
   const pi = project_info

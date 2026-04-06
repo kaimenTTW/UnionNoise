@@ -1,4 +1,4 @@
-import { useNavigate, useParams } from 'react-router-dom'
+import { useLocation, useNavigate, useParams } from 'react-router-dom'
 import { useProjectStore, useUnlockedUpTo } from '../store/projectStore'
 import { STEPS, type StepStatus } from '../types'
 
@@ -36,26 +36,35 @@ function StatusIcon({ status }: { status: StepStatus }) {
 
 export default function Sidebar() {
   const navigate = useNavigate()
-  const params = useParams()
-  const currentStep = parseInt(params.step ?? '1', 10)
+  const { id } = useParams<{ id: string }>()
+  const location = useLocation()
+  // Derive current step from pathname since step routes are static, not parameterised
+  const stepMatch = location.pathname.match(/\/step\/(\d+)$/)
+  const currentStep = stepMatch ? parseInt(stepMatch[1], 10) : 1
   const unlockedUpTo = useUnlockedUpTo()
   const { project_info, site_data } = useProjectStore()
 
   return (
     <aside className="flex w-64 shrink-0 flex-col border-r border-border bg-panel">
-      {/* Wordmark */}
-      <div className="border-b border-border px-6 py-5">
+      {/* Back to projects */}
+      <div className="border-b border-border px-6 py-4">
+        <button
+          onClick={() => navigate('/')}
+          className="mb-3 flex items-center gap-1.5 text-xs text-muted transition-colors hover:text-white"
+        >
+          ← Projects
+        </button>
         <p className="text-xs font-semibold uppercase tracking-widest text-muted">Union Noise</p>
         <p className="mt-0.5 text-sm font-semibold text-white">Barrier Design System</p>
       </div>
 
       {/* Step list */}
       <nav className="flex-1 py-4">
-        {STEPS.map((step) => {
-          const locked = step.number > unlockedUpTo
-          const isActive = step.number === currentStep
+        {STEPS.map((s) => {
+          const locked = s.number > unlockedUpTo
+          const isActive = s.number === currentStep
           const status = stepStatus(
-            step.number,
+            s.number,
             project_info.step1_confirmed,
             site_data.step2_confirmed,
             currentStep,
@@ -63,10 +72,10 @@ export default function Sidebar() {
 
           return (
             <button
-              key={step.number}
+              key={s.number}
               disabled={locked}
               onClick={() => {
-                if (!locked) navigate(`/step/${step.number}`)
+                if (!locked) navigate(`/project/${id}/step/${s.number}`)
               }}
               className={[
                 'flex w-full items-start gap-3 px-5 py-3 text-left transition-colors',
@@ -87,10 +96,10 @@ export default function Sidebar() {
                     isActive ? 'text-accent' : '',
                   ].join(' ')}
                 >
-                  Step {step.number}
+                  Step {s.number}
                 </p>
-                <p className="truncate text-sm font-medium leading-tight">{step.title}</p>
-                <p className="mt-0.5 truncate text-xs opacity-60">{step.subtitle}</p>
+                <p className="truncate text-sm font-medium leading-tight">{s.title}</p>
+                <p className="mt-0.5 truncate text-xs opacity-60">{s.subtitle}</p>
               </div>
             </button>
           )
@@ -99,7 +108,7 @@ export default function Sidebar() {
 
       {/* Bottom metadata */}
       <div className="border-t border-border px-5 py-4">
-        <p className="text-xs text-muted">v0.1.0 — prototype</p>
+        <p className="text-xs text-muted">v0.2.0 — prototype</p>
         <p className="mt-0.5 text-xs text-muted/50">Hebei Jinbiao / Union Noise</p>
       </div>
     </aside>

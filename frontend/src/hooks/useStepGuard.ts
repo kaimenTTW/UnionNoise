@@ -1,5 +1,5 @@
 import { useEffect } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, useParams } from 'react-router-dom'
 import { useUnlockedUpTo } from '../store/projectStore'
 
 /**
@@ -9,10 +9,11 @@ import { useUnlockedUpTo } from '../store/projectStore'
 export function useStepGuard(currentStep: number): void {
   const unlockedUpTo = useUnlockedUpTo()
   const navigate = useNavigate()
+  const { id } = useParams<{ id: string }>()
 
   useEffect(() => {
     if (currentStep > unlockedUpTo) {
-      navigate(`/step/${unlockedUpTo}`, { replace: true })
+      navigate(`/project/${id}/step/${unlockedUpTo}`, { replace: true })
     }
-  }, [currentStep, unlockedUpTo, navigate])
+  }, [currentStep, unlockedUpTo, navigate, id])
 }

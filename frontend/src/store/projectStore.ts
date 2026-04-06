@@ -1,15 +1,23 @@
 import { create } from 'zustand'
-import type { BarrierType, CalibrationData, ProjectInfo, SegmentRow, SiteData } from '../types'
+import type { BarrierType, CalibrationData, CodeReference, Polyline, ProjectInfo, SegmentRow, SiteData } from '../types'
 
 interface ProjectStore {
   project_info: ProjectInfo
   site_data: SiteData
+  applicable_codes: CodeReference[]
 
   setProjectInfo: (partial: Partial<ProjectInfo>) => void
   setSiteData: (partial: Partial<SiteData>) => void
   setCalibration: (partial: Partial<CalibrationData>) => void
-  setAlignmentPoints: (points: Array<{ x: number; y: number }>) => void
-  updateSegmentTag: (id: string, tag: SegmentRow['tag']) => void
+
+  // Polyline actions
+  startNewPolyline: () => void
+  addPolylinePoint: (polylineId: number, pt: { x: number; y: number }) => void
+  undoLastPoint: (polylineId: number) => void
+  deletePolyline: (polylineId: number) => void
+
+  updateSegmentTag: (alignment_id: number, segment_id: string, tag: SegmentRow['tag']) => void
+  toggleCode: (en_designation: string) => void
   confirmStep1: () => void
   confirmStep2: () => void
   reset: () => void
@@ -25,6 +33,17 @@ const defaultProjectInfo: ProjectInfo = {
   step1_confirmed: false,
 }
 
+// Defaults per PRD v4 Section 2.3 — confirmed from PE calculation reports
+const defaultApplicableCodes: CodeReference[] = [
+  { en_designation: 'EN 1990:2002',                                         eurocode_label: 'Eurocode 0 — Basis of Structural Design',    governs: 'Basis of structural design',                        selected: true },
+  { en_designation: 'EN 1991-1-1 to 1-7',                                  eurocode_label: 'Eurocode 1 — Actions on Structures',          governs: 'Actions on structures including wind',              selected: true },
+  { en_designation: 'EN 1992-1-1:2004, EN 1992-1-2:2004, EN 1992-2:2005, EN 1992-3:2006', eurocode_label: 'Eurocode 2 — Design of Concrete Structures', governs: 'Design of concrete structures',                     selected: true },
+  { en_designation: 'EN 1993-1-1 to 1-12 (incl. EN 1993-1-8:2005 joints)', eurocode_label: 'Eurocode 3 — Design of Steel Structures',     governs: 'Design of steel structures',                        selected: true },
+  { en_designation: 'EN 1997-1:2004',                                       eurocode_label: 'Eurocode 7 — Geotechnical Design',            governs: 'Foundation design (DA1C1, DA1C2)',                   selected: true },
+  { en_designation: 'NA to SS EN 1991-1-4:2009 (and related parts)',        eurocode_label: 'Singapore National Annex',                    governs: 'SG-specific parameters (terrain, wind, load combos)', selected: true },
+  { en_designation: 'SS 602:2014',                                          eurocode_label: 'SS 602:2014',                                 governs: 'Noise control on construction sites',                selected: false },
+]
+
 const defaultSiteData: SiteData = {
   site_plan_image: null,
   site_plan_filename: null,
@@ -34,7 +53,7 @@ const defaultSiteData: SiteData = {
     known_distance: null,
     px_per_m: null,
   },
-  alignment_points: [],
+  polylines: [],
   segment_table: [],
   step2_confirmed: false,
 }
@@ -50,31 +69,46 @@ function indexToLabel(n: number): string {
   return label
 }
 
-/** Recompute segment table from raw alignment points and calibration. */
+function pixelDist(a: { x: number; y: number }, b: { x: number; y: number }) {
+  return Math.sqrt((b.x - a.x) ** 2 + (b.y - a.y) ** 2)
+}
+
+/** Recompute segment table from all polylines and calibration.
+ *  Segment IDs reset A, B, C… per alignment. Tags are preserved from existingTags. */
 function buildSegmentTable(
-  points: Array<{ x: number; y: number }>,
+  polylines: Polyline[],
   px_per_m: number | null,
   existingTags: Map<string, SegmentRow['tag']>,
 ): SegmentRow[] {
-  if (points.length < 2) return []
-  return points.slice(0, -1).map((p, i) => {
-    const next = points[i + 1]
-    const dx = next.x - p.x
-    const dy = next.y - p.y
-    const px = Math.sqrt(dx * dx + dy * dy)
-    const id = indexToLabel(i)
-    const length_m = px_per_m != null && px_per_m > 0 ? parseFloat((px / px_per_m).toFixed(2)) : 0
-    return {
-      id,
-      length_m,
-      tag: existingTags.get(id) ?? 'Standard',
+  const rows: SegmentRow[] = []
+  for (const polyline of polylines) {
+    const pts = polyline.points
+    for (let i = 0; i < pts.length - 1; i++) {
+      const dx = pts[i + 1].x - pts[i].x
+      const dy = pts[i + 1].y - pts[i].y
+      const px = Math.sqrt(dx * dx + dy * dy)
+      const segment_id = indexToLabel(i)
+      const key = `${polyline.id}-${segment_id}`
+      const length_m = px_per_m != null && px_per_m > 0 ? parseFloat((px / px_per_m).toFixed(2)) : 0
+      rows.push({
+        alignment_id: polyline.id,
+        segment_id,
+        length_m,
+        tag: existingTags.get(key) ?? 'Standard',
+      })
     }
-  })
+  }
+  return rows
+}
+
+function getExistingTags(segment_table: SegmentRow[]): Map<string, SegmentRow['tag']> {
+  return new Map(segment_table.map((r) => [`${r.alignment_id}-${r.segment_id}`, r.tag]))
 }
 
 export const useProjectStore = create<ProjectStore>((set, get) => ({
   project_info: defaultProjectInfo,
   site_data: defaultSiteData,
+  applicable_codes: defaultApplicableCodes,
 
   setProjectInfo: (partial) =>
     set((s) => ({ project_info: { ...s.project_info, ...partial } })),
@@ -85,39 +119,61 @@ export const useProjectStore = create<ProjectStore>((set, get) => ({
   setCalibration: (partial) =>
     set((s) => {
       const calibration = { ...s.site_data.calibration, ...partial }
-      // Recompute segment table if px_per_m changed
-      const existingTags = new Map(
-        s.site_data.segment_table.map((r) => [r.id, r.tag] as [string, SegmentRow['tag']]),
-      )
-      const segment_table = buildSegmentTable(
-        s.site_data.alignment_points,
-        calibration.px_per_m,
-        existingTags,
-      )
+      const existingTags = getExistingTags(s.site_data.segment_table)
+      const segment_table = buildSegmentTable(s.site_data.polylines, calibration.px_per_m, existingTags)
       return { site_data: { ...s.site_data, calibration, segment_table } }
     }),
 
-  setAlignmentPoints: (points) =>
+  startNewPolyline: () =>
     set((s) => {
-      const existingTags = new Map(
-        s.site_data.segment_table.map((r) => [r.id, r.tag] as [string, SegmentRow['tag']]),
-      )
-      const segment_table = buildSegmentTable(
-        points,
-        s.site_data.calibration.px_per_m,
-        existingTags,
-      )
-      return { site_data: { ...s.site_data, alignment_points: points, segment_table } }
+      const nextId = s.site_data.polylines.length + 1
+      const polylines = [...s.site_data.polylines, { id: nextId, points: [] }]
+      return { site_data: { ...s.site_data, polylines } }
     }),
 
-  updateSegmentTag: (id, tag) =>
+  addPolylinePoint: (polylineId, pt) =>
+    set((s) => {
+      const polylines = s.site_data.polylines.map((pl) =>
+        pl.id === polylineId ? { ...pl, points: [...pl.points, pt] } : pl,
+      )
+      const existingTags = getExistingTags(s.site_data.segment_table)
+      const segment_table = buildSegmentTable(polylines, s.site_data.calibration.px_per_m, existingTags)
+      return { site_data: { ...s.site_data, polylines, segment_table } }
+    }),
+
+  undoLastPoint: (polylineId) =>
+    set((s) => {
+      const polylines = s.site_data.polylines.map((pl) =>
+        pl.id === polylineId ? { ...pl, points: pl.points.slice(0, -1) } : pl,
+      )
+      const existingTags = getExistingTags(s.site_data.segment_table)
+      const segment_table = buildSegmentTable(polylines, s.site_data.calibration.px_per_m, existingTags)
+      return { site_data: { ...s.site_data, polylines, segment_table } }
+    }),
+
+  deletePolyline: (polylineId) =>
+    set((s) => {
+      const polylines = s.site_data.polylines.filter((pl) => pl.id !== polylineId)
+      const existingTags = getExistingTags(s.site_data.segment_table)
+      const segment_table = buildSegmentTable(polylines, s.site_data.calibration.px_per_m, existingTags)
+      return { site_data: { ...s.site_data, polylines, segment_table } }
+    }),
+
+  updateSegmentTag: (alignment_id, segment_id, tag) =>
     set((s) => ({
       site_data: {
         ...s.site_data,
         segment_table: s.site_data.segment_table.map((r) =>
-          r.id === id ? { ...r, tag } : r,
+          r.alignment_id === alignment_id && r.segment_id === segment_id ? { ...r, tag } : r,
         ),
       },
+    })),
+
+  toggleCode: (en_designation) =>
+    set((s) => ({
+      applicable_codes: s.applicable_codes.map((c) =>
+        c.en_designation === en_designation ? { ...c, selected: !c.selected } : c,
+      ),
     })),
 
   confirmStep1: () =>
@@ -131,7 +187,7 @@ export const useProjectStore = create<ProjectStore>((set, get) => ({
     })),
 
   reset: () =>
-    set({ project_info: defaultProjectInfo, site_data: defaultSiteData }),
+    set({ project_info: defaultProjectInfo, site_data: defaultSiteData, applicable_codes: defaultApplicableCodes }),
 }))
 
 // ─── Derived selectors ────────────────────────────────────────────────────────
@@ -141,7 +197,7 @@ export function useUnlockedUpTo(): number {
   const { project_info, site_data } = useProjectStore()
   if (!project_info.step1_confirmed) return 1
   if (!site_data.step2_confirmed) return 2
-  return 6 // scaffolds 3–6 all accessible once step 2 is confirmed
+  return 6
 }
 
 /** True when all required Step 1 fields are non-empty. */

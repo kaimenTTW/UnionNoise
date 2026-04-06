@@ -1,6 +1,6 @@
 import { fabric } from 'fabric'
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, useParams } from 'react-router-dom'
 import { usePdfRenderer } from '../hooks/usePdfRenderer'
 import { useStepGuard } from '../hooks/useStepGuard'
 import { useProjectStore } from '../store/projectStore'
@@ -19,12 +19,28 @@ function pixelDist(a: { x: number; y: number }, b: { x: number; y: number }) {
   return Math.sqrt((b.x - a.x) ** 2 + (b.y - a.y) ** 2)
 }
 
+// Canvas objects for a single polyline
+interface PolylineCanvasObjects {
+  lines: fabric.Line[]
+  dots: fabric.Circle[]
+}
+
 export default function Step2() {
   useStepGuard(2)
   const navigate = useNavigate()
+  const { id } = useParams<{ id: string }>()
 
-  const { site_data, setSiteData, setCalibration, setAlignmentPoints, updateSegmentTag, confirmStep2 } =
-    useProjectStore()
+  const {
+    site_data,
+    setSiteData,
+    setCalibration,
+    startNewPolyline,
+    addPolylinePoint,
+    undoLastPoint,
+    deletePolyline,
+    updateSegmentTag,
+    confirmStep2,
+  } = useProjectStore()
 
   const fileInputRef = useRef<HTMLInputElement>(null)
   const [selectedFile, setSelectedFile] = useState<File | null>(null)
@@ -33,15 +49,13 @@ export default function Step2() {
   // PDF.js renders first page → data URL
   const pdf = usePdfRenderer(isPdf ? selectedFile : null, 2)
 
-  // The resolved data URL: from PDF.js for PDFs, from FileReader for images
   const [imageDataUrl, setImageDataUrl] = useState<string | null>(null)
 
-  // When a PDF finishes rendering, use its data URL
   useEffect(() => {
     if (pdf.dataUrl) setImageDataUrl(pdf.dataUrl)
   }, [pdf.dataUrl])
 
-  // Fabric owns this div entirely — React never renders children inside it
+  // Fabric canvas
   const fabricContainerRef = useRef<HTMLDivElement>(null)
   const fabricRef = useRef<fabric.Canvas | null>(null)
   const bgImageRef = useRef<fabric.Image | null>(null)
@@ -55,20 +69,23 @@ export default function Step2() {
   const [calDotObjects, setCalDotObjects] = useState<fabric.Circle[]>([])
   const [calLineObject, setCalLineObject] = useState<fabric.Line | null>(null)
 
-  const lineObjectsRef = useRef<fabric.Line[]>([])
-  const dotObjectsRef = useRef<fabric.Circle[]>([])
+  // Per-polyline canvas objects: Map<polylineId, {lines, dots}>
+  const polylinesOnCanvasRef = useRef<Map<number, PolylineCanvasObjects>>(new Map())
 
-  // Refs for stable mouse handler
+  // Which polyline is currently being drawn (null if not drawing)
+  const [activePolylineId, setActivePolylineId] = useState<number | null>(null)
+
+  // Stable refs for mouse handler
   const modeRef = useRef(mode)
   const calClickCountRef = useRef(calClickCount)
   const knownDistanceRef = useRef(knownDistance)
-  const alignmentPointsRef = useRef(site_data.alignment_points)
   const calPointsRef = useRef(calPoints)
+  const activePolylineIdRef = useRef(activePolylineId)
   useEffect(() => { modeRef.current = mode }, [mode])
   useEffect(() => { calClickCountRef.current = calClickCount }, [calClickCount])
   useEffect(() => { knownDistanceRef.current = knownDistance }, [knownDistance])
-  useEffect(() => { alignmentPointsRef.current = site_data.alignment_points }, [site_data.alignment_points])
   useEffect(() => { calPointsRef.current = calPoints }, [calPoints])
+  useEffect(() => { activePolylineIdRef.current = activePolylineId }, [activePolylineId])
 
   // ── Init Fabric ───────────────────────────────────────────────────────────
 
@@ -93,7 +110,7 @@ export default function Step2() {
       return
     }
 
-    // ── Zoom: mouse wheel ─────────────────────────────────────────────────
+    // Zoom: mouse wheel
     fc.on('mouse:wheel', (opt) => {
       const delta = (opt.e as WheelEvent).deltaY
       let zoom = fc!.getZoom()
@@ -104,7 +121,7 @@ export default function Step2() {
       opt.e.stopPropagation()
     })
 
-    // ── Pan: alt + drag ───────────────────────────────────────────────────
+    // Pan: alt + drag
     let isPanning = false
     let lastPos = { x: 0, y: 0 }
 
@@ -140,11 +157,12 @@ export default function Step2() {
       try { fc?.dispose() } catch { /* ignore */ }
       fabricRef.current = null
       setFabricReady(false)
+      polylinesOnCanvasRef.current.clear()
       while (container.firstChild) container.removeChild(container.firstChild)
     }
   }, [])
 
-  // ── Load image into Fabric as background when data URL is ready ───────────
+  // ── Load image into Fabric as background ─────────────────────────────────
 
   useEffect(() => {
     const fc = fabricRef.current
@@ -155,26 +173,19 @@ export default function Step2() {
       const fc2 = fabricRef.current
       if (!fc2) return
 
-      // Remove old background
       if (bgImageRef.current) {
         fc2.remove(bgImageRef.current)
         bgImageRef.current = null
       }
 
-      // Fit image to canvas, centred
       const scale = Math.min(CANVAS_W / imgEl.naturalWidth, CANVAS_H / imgEl.naturalHeight)
       const left = (CANVAS_W - imgEl.naturalWidth * scale) / 2
       const top = (CANVAS_H - imgEl.naturalHeight * scale) / 2
 
       const fabricImg = new fabric.Image(imgEl, {
-        left,
-        top,
-        scaleX: scale,
-        scaleY: scale,
-        selectable: false,
-        evented: false,
-        lockMovementX: true,
-        lockMovementY: true,
+        left, top, scaleX: scale, scaleY: scale,
+        selectable: false, evented: false,
+        lockMovementX: true, lockMovementY: true,
       })
       fc2.add(fabricImg)
       fc2.sendToBack(fabricImg)
@@ -184,7 +195,7 @@ export default function Step2() {
     imgEl.src = imageDataUrl
   }, [imageDataUrl])
 
-  // ── Reset zoom/pan to fit ─────────────────────────────────────────────────
+  // ── Reset zoom/pan ────────────────────────────────────────────────────────
 
   const resetView = () => {
     const fc = fabricRef.current
@@ -200,9 +211,8 @@ export default function Step2() {
     if (!fc || !fabricReady) return
 
     const onMouseDown = (opt: fabric.IEvent<MouseEvent>) => {
-      if (opt.e.altKey) return // panning — ignore
+      if (opt.e.altKey) return
 
-      // getPointer accounts for current viewport transform (zoom/pan)
       const pointer = fc.getPointer(opt.e)
       const pt = { x: Math.round(pointer.x), y: Math.round(pointer.y) }
 
@@ -234,14 +244,14 @@ export default function Step2() {
           }
           setMode('idle')
         }
-      } else if (modeRef.current === 'drawing') {
-        setAlignmentPoints([...alignmentPointsRef.current, pt])
+      } else if (modeRef.current === 'drawing' && activePolylineIdRef.current !== null) {
+        addPolylinePoint(activePolylineIdRef.current, pt)
       }
     }
 
     fc.on('mouse:down', onMouseDown)
     return () => { fc.off('mouse:down', onMouseDown) }
-  }, [fabricReady, setCalibration, setAlignmentPoints])
+  }, [fabricReady, setCalibration, addPolylinePoint])
 
   // ── Cursor ────────────────────────────────────────────────────────────────
 
@@ -251,35 +261,49 @@ export default function Step2() {
     fc.defaultCursor = mode === 'idle' ? 'default' : 'crosshair'
   }, [mode])
 
-  // ── Redraw polyline ───────────────────────────────────────────────────────
+  // ── Redraw all polylines when store changes ───────────────────────────────
 
-  const redrawPolyline = useCallback((points: Array<{ x: number; y: number }>) => {
+  const redrawAllPolylines = useCallback(() => {
     const fc = fabricRef.current
     if (!fc) return
-    lineObjectsRef.current.forEach((o) => fc.remove(o))
-    dotObjectsRef.current.forEach((o) => fc.remove(o))
-    lineObjectsRef.current = []
-    dotObjectsRef.current = []
-    for (let i = 0; i < points.length - 1; i++) {
-      const ln = new fabric.Line(
-        [points[i].x, points[i].y, points[i + 1].x, points[i + 1].y],
-        { stroke: LINE_COLOR, strokeWidth: 2, selectable: false, evented: false },
-      )
-      fc.add(ln)
-      lineObjectsRef.current.push(ln)
-    }
-    points.forEach((p) => {
-      const d = new fabric.Circle({
-        left: p.x - 4, top: p.y - 4, radius: 4,
-        fill: DOT_COLOR, selectable: false, evented: false,
-      })
-      fc.add(d)
-      dotObjectsRef.current.push(d)
-    })
-    fc.requestRenderAll()
-  }, [])
 
-  useEffect(() => { redrawPolyline(site_data.alignment_points) }, [site_data.alignment_points, redrawPolyline])
+    // Remove old canvas objects for all polylines
+    polylinesOnCanvasRef.current.forEach(({ lines, dots }) => {
+      lines.forEach((o) => fc.remove(o))
+      dots.forEach((o) => fc.remove(o))
+    })
+    polylinesOnCanvasRef.current.clear()
+
+    // Redraw each polyline from store
+    for (const polyline of site_data.polylines) {
+      const pts = polyline.points
+      const lines: fabric.Line[] = []
+      const dots: fabric.Circle[] = []
+
+      for (let i = 0; i < pts.length - 1; i++) {
+        const ln = new fabric.Line(
+          [pts[i].x, pts[i].y, pts[i + 1].x, pts[i + 1].y],
+          { stroke: LINE_COLOR, strokeWidth: 2, selectable: false, evented: false },
+        )
+        fc.add(ln)
+        lines.push(ln)
+      }
+      pts.forEach((p) => {
+        const d = new fabric.Circle({
+          left: p.x - 4, top: p.y - 4, radius: 4,
+          fill: DOT_COLOR, selectable: false, evented: false,
+        })
+        fc.add(d)
+        dots.push(d)
+      })
+
+      polylinesOnCanvasRef.current.set(polyline.id, { lines, dots })
+    }
+
+    fc.requestRenderAll()
+  }, [site_data.polylines])
+
+  useEffect(() => { redrawAllPolylines() }, [redrawAllPolylines])
 
   // ── File selection ────────────────────────────────────────────────────────
 
@@ -290,7 +314,6 @@ export default function Step2() {
     setSiteData({ site_plan_filename: file.name })
 
     if (file.type !== 'application/pdf') {
-      // Images: read to data URL immediately
       const reader = new FileReader()
       reader.onload = (ev) => {
         const url = ev.target?.result as string
@@ -299,14 +322,12 @@ export default function Step2() {
       }
       reader.readAsDataURL(file)
     } else {
-      // PDF: usePdfRenderer hook handles rendering; update store filename now
       setSiteData({ site_plan_image: null, site_plan_filename: file.name })
-      setImageDataUrl(null) // cleared; will be set when pdf.dataUrl arrives
+      setImageDataUrl(null)
     }
     e.target.value = ''
   }
 
-  // Sync PDF data URL into store and local state once rendered
   useEffect(() => {
     if (pdf.dataUrl) {
       setImageDataUrl(pdf.dataUrl)
@@ -314,7 +335,7 @@ export default function Step2() {
     }
   }, [pdf.dataUrl, setSiteData])
 
-  // ── Calibration / drawing actions ────────────────────────────────────────
+  // ── Calibration actions ───────────────────────────────────────────────────
 
   const handleStartCalibration = () => {
     const dist = parseFloat(knownDistance)
@@ -332,28 +353,52 @@ export default function Step2() {
     setMode('calibrating')
   }
 
-  const handleUndoPoint = () => {
-    if (site_data.alignment_points.length > 0)
-      setAlignmentPoints(site_data.alignment_points.slice(0, -1))
+  // ── Drawing actions ───────────────────────────────────────────────────────
+
+  const handleStartDrawing = () => {
+    startNewPolyline()
+    // The new polyline id will be polylines.length + 1 before the state update,
+    // but after startNewPolyline runs the store length increases. We compute it here.
+    const nextId = site_data.polylines.length + 1
+    setActivePolylineId(nextId)
+    setMode('drawing')
   }
 
-  const handleClearAll = () => {
-    setAlignmentPoints([])
-    const fc = fabricRef.current
-    if (fc) {
-      lineObjectsRef.current.forEach((o) => fc.remove(o))
-      dotObjectsRef.current.forEach((o) => fc.remove(o))
-      lineObjectsRef.current = []
-      dotObjectsRef.current = []
-      fc.requestRenderAll()
+  const handleStopDrawing = () => {
+    setMode('idle')
+    setActivePolylineId(null)
+  }
+
+  const handleUndoPoint = () => {
+    if (activePolylineId !== null) {
+      undoLastPoint(activePolylineId)
     }
   }
 
-  const handleConfirm = () => { confirmStep2(); navigate('/step/3') }
+  const handleDeletePolyline = (polylineId: number) => {
+    deletePolyline(polylineId)
+    if (activePolylineId === polylineId) {
+      setActivePolylineId(null)
+      setMode('idle')
+    }
+  }
 
-  const canConfirm = site_data.calibration.px_per_m !== null && site_data.segment_table.length >= 1
+  const handleClearAll = () => {
+    // Delete all polylines one by one
+    for (const pl of site_data.polylines) {
+      deletePolyline(pl.id)
+    }
+    setActivePolylineId(null)
+    setMode('idle')
+  }
+
+  const handleConfirm = () => { confirmStep2(); navigate(`/project/${id}/step/3`) }
+
   const { px_per_m } = site_data.calibration
+  const totalSegments = site_data.segment_table.length
   const totalLength = site_data.segment_table.reduce((s, r) => s + r.length_m, 0)
+  const totalVertices = site_data.polylines.reduce((s, p) => s + p.points.length, 0)
+  const canConfirm = px_per_m !== null && totalSegments >= 1
   const isLoading = pdf.loading
 
   return (
@@ -367,7 +412,7 @@ export default function Step2() {
       </div>
 
       <div className="flex flex-1 overflow-hidden">
-        {/* Left */}
+        {/* Left column */}
         <div className="flex w-[62%] shrink-0 flex-col gap-4 overflow-y-auto border-r border-border p-5">
 
           {/* Upload row */}
@@ -389,32 +434,26 @@ export default function Step2() {
             {pdf.error && <span className="text-xs text-danger">PDF error: {pdf.error}</span>}
           </div>
 
-          {/* Hint */}
           <p className="text-xs text-muted -mt-2">
             Scroll to zoom · Alt + drag to pan · <button type="button" className="underline hover:text-white" onClick={resetView}>Reset view</button>
           </p>
 
-          {/* Canvas — Fabric owns everything inside fabricContainerRef */}
+          {/* Canvas */}
           <div
             className="rounded-lg border border-border overflow-hidden"
             style={{ width: CANVAS_W, height: CANVAS_H, flexShrink: 0, position: 'relative' }}
           >
             <div ref={fabricContainerRef} style={{ width: CANVAS_W, height: CANVAS_H }} />
 
-            {/* Overlay shown before any file is loaded */}
             {!imageDataUrl && !isLoading && (
-              <div
-                style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', pointerEvents: 'none' }}
-                className="text-muted text-sm"
-              >
+              <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', pointerEvents: 'none' }}
+                className="text-muted text-sm">
                 Upload a site plan to begin
               </div>
             )}
             {isLoading && (
-              <div
-                style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', pointerEvents: 'none' }}
-                className="text-muted text-sm gap-2 flex"
-              >
+              <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', pointerEvents: 'none' }}
+                className="text-muted text-sm gap-2 flex">
                 <span className="inline-block h-4 w-4 animate-spin rounded-full border-2 border-muted/30 border-t-muted" />
                 Rendering PDF…
               </div>
@@ -455,36 +494,88 @@ export default function Step2() {
             )}
           </div>
 
-          {/* Drawing */}
+          {/* Drawing controls */}
           <div className="panel space-y-3">
             <p className="text-xs font-semibold uppercase tracking-wide text-muted">Barrier Digitisation</p>
             <div className="flex flex-wrap gap-2">
-              <button type="button"
-                onClick={() => setMode(mode === 'drawing' ? 'idle' : 'drawing')}
-                disabled={mode === 'calibrating'}
-                className={['btn-secondary', mode === 'drawing' ? 'border-accent text-accent' : ''].join(' ')}>
-                {mode === 'drawing' ? 'Stop Drawing' : 'Start Drawing'}
+              {mode === 'drawing' ? (
+                <button type="button" onClick={handleStopDrawing}
+                  className="btn-secondary border-accent text-accent">
+                  Stop Drawing
+                </button>
+              ) : (
+                <button type="button" onClick={handleStartDrawing}
+                  disabled={mode === 'calibrating'}
+                  className="btn-secondary">
+                  Start Drawing
+                </button>
+              )}
+              <button type="button" onClick={handleUndoPoint}
+                disabled={mode !== 'drawing' || activePolylineId === null}
+                className="btn-secondary">
+                Undo Last Point
               </button>
-              <button type="button" onClick={handleUndoPoint} disabled={site_data.alignment_points.length === 0} className="btn-secondary">Undo Last Point</button>
-              <button type="button" onClick={handleClearAll} disabled={site_data.alignment_points.length === 0} className="btn-secondary">Clear All</button>
+              <button type="button" onClick={handleClearAll}
+                disabled={site_data.polylines.length === 0}
+                className="btn-secondary">
+                Clear All
+              </button>
             </div>
-            {mode === 'drawing' && <p className="text-xs text-accent">Click on the canvas to place alignment vertices.</p>}
-            {site_data.alignment_points.length > 0 && (
-              <p className="text-xs text-muted">{site_data.alignment_points.length} vertices · {site_data.segment_table.length} segments</p>
+            {mode === 'drawing' && activePolylineId !== null && (
+              <p className="text-xs text-accent">
+                Drawing Alignment {activePolylineId} — click on the canvas to place vertices.
+              </p>
+            )}
+            {totalVertices > 0 && (
+              <p className="text-xs text-muted">
+                {site_data.polylines.length} alignment{site_data.polylines.length !== 1 ? 's' : ''} · {totalVertices} vertices · {totalSegments} segments
+              </p>
             )}
           </div>
+
+          {/* Alignment list with delete controls */}
+          {site_data.polylines.length > 0 && (
+            <div className="panel space-y-2">
+              <p className="text-xs font-semibold uppercase tracking-wide text-muted">Alignments</p>
+              {site_data.polylines.map((pl) => {
+                const segCount = site_data.segment_table.filter((r) => r.alignment_id === pl.id).length
+                const isActive = activePolylineId === pl.id
+                return (
+                  <div key={pl.id}
+                    className={[
+                      'flex items-center justify-between rounded border px-3 py-2 text-sm',
+                      isActive ? 'border-accent/50 bg-accent/5' : 'border-border',
+                    ].join(' ')}>
+                    <span className={isActive ? 'text-accent font-semibold' : 'text-white'}>
+                      Alignment {pl.id}
+                      <span className="ml-2 text-xs text-muted font-normal">
+                        {pl.points.length} pts · {segCount} seg{segCount !== 1 ? 's' : ''}
+                      </span>
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => handleDeletePolyline(pl.id)}
+                      className="text-xs text-muted hover:text-danger transition-colors"
+                    >
+                      Delete
+                    </button>
+                  </div>
+                )
+              })}
+            </div>
+          )}
         </div>
 
         {/* Right: segment table */}
         <div className="flex flex-1 flex-col overflow-hidden p-5">
           <div className="mb-3 flex items-baseline justify-between">
             <p className="text-sm font-semibold text-white">Segment Table</p>
-            {site_data.segment_table.length > 0 && (
+            {totalSegments > 0 && (
               <p className="text-xs text-muted">Total: <span className="font-semibold text-white">{totalLength.toFixed(2)} m</span></p>
             )}
           </div>
 
-          {site_data.segment_table.length === 0 ? (
+          {totalSegments === 0 ? (
             <div className="flex flex-1 items-center justify-center rounded-lg border border-dashed border-border text-sm text-muted">
               {px_per_m === null ? 'Calibrate scale first, then draw segments' : 'Draw the barrier alignment to generate segments'}
             </div>
@@ -493,19 +584,22 @@ export default function Step2() {
               <table className="w-full text-sm">
                 <thead>
                   <tr className="border-b border-border bg-panel text-xs font-semibold uppercase tracking-wide text-muted">
-                    <th className="px-4 py-2.5 text-left">ID</th>
-                    <th className="px-4 py-2.5 text-right">Length (m)</th>
-                    <th className="px-4 py-2.5 text-left">Tag</th>
+                    <th className="px-3 py-2.5 text-left">Align</th>
+                    <th className="px-3 py-2.5 text-left">ID</th>
+                    <th className="px-3 py-2.5 text-right">Length (m)</th>
+                    <th className="px-3 py-2.5 text-left">Tag</th>
                   </tr>
                 </thead>
                 <tbody>
                   {site_data.segment_table.map((row) => (
-                    <tr key={row.id} className="border-b border-border/50 hover:bg-white/[0.02]">
-                      <td className="px-4 py-2.5 font-mono font-semibold text-accent">{row.id}</td>
-                      <td className="px-4 py-2.5 text-right font-mono">{row.length_m.toFixed(2)}</td>
-                      <td className="px-4 py-2.5">
+                    <tr key={`${row.alignment_id}-${row.segment_id}`}
+                      className="border-b border-border/50 hover:bg-white/[0.02]">
+                      <td className="px-3 py-2.5 font-mono text-muted">{row.alignment_id}</td>
+                      <td className="px-3 py-2.5 font-mono font-semibold text-accent">{row.segment_id}</td>
+                      <td className="px-3 py-2.5 text-right font-mono">{row.length_m.toFixed(2)}</td>
+                      <td className="px-3 py-2.5">
                         <select className="field-input py-1 text-xs" value={row.tag}
-                          onChange={(e) => updateSegmentTag(row.id, e.target.value as SegmentRow['tag'])}>
+                          onChange={(e) => updateSegmentTag(row.alignment_id, row.segment_id, e.target.value as SegmentRow['tag'])}>
                           {TAG_OPTIONS.map((t) => <option key={t} value={t}>{t}</option>)}
                         </select>
                       </td>
