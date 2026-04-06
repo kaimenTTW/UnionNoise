@@ -49,7 +49,8 @@ export default function Step2() {
   // PDF.js renders first page → data URL
   const pdf = usePdfRenderer(isPdf ? selectedFile : null, 2)
 
-  const [imageDataUrl, setImageDataUrl] = useState<string | null>(null)
+  // Seed from store so the image is restored when navigating back to this step
+  const [imageDataUrl, setImageDataUrl] = useState<string | null>(site_data.site_plan_image)
 
   useEffect(() => {
     if (pdf.dataUrl) setImageDataUrl(pdf.dataUrl)
@@ -250,7 +251,7 @@ export default function Step2() {
     }
 
     fc.on('mouse:down', onMouseDown)
-    return () => { fc.off('mouse:down', onMouseDown) }
+    return () => { (fc as fabric.Canvas & { off: (event: string, handler: unknown) => void }).off('mouse:down', onMouseDown) }
   }, [fabricReady, setCalibration, addPolylinePoint])
 
   // ── Cursor ────────────────────────────────────────────────────────────────
