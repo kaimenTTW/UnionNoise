@@ -6,10 +6,12 @@ function stepStatus(
   stepNumber: number,
   step1Confirmed: boolean,
   step2Confirmed: boolean,
+  step3Confirmed: boolean,
   currentStep: number,
 ): StepStatus {
   if (stepNumber === 1 && step1Confirmed) return 'complete'
   if (stepNumber === 2 && step2Confirmed) return 'complete'
+  if (stepNumber === 3 && step3Confirmed) return 'complete'
   if (stepNumber === currentStep) return 'in-progress'
   return 'not-started'
 }
@@ -42,7 +44,7 @@ export default function Sidebar() {
   const stepMatch = location.pathname.match(/\/step\/(\d+)$/)
   const currentStep = stepMatch ? parseInt(stepMatch[1], 10) : 1
   const unlockedUpTo = useUnlockedUpTo()
-  const { project_info, site_data } = useProjectStore()
+  const { project_info, site_data, step3_confirmed } = useProjectStore()
 
   return (
     <aside className="flex w-64 shrink-0 flex-col border-r border-border bg-panel">
@@ -67,6 +69,7 @@ export default function Sidebar() {
             s.number,
             project_info.step1_confirmed,
             site_data.step2_confirmed,
+            step3_confirmed,
             currentStep,
           )
 

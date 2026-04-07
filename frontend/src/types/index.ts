@@ -29,6 +29,63 @@ export interface Project {
   status: 'draft' | 'complete'
 }
 
+// ─── Design parameters ───────────────────────────────────────────────────────
+// PROVISIONAL: defaults pending SME validation — see PRD Section 2.4 / 2.5
+
+export type WindZone = 'A' | 'B' | 'C' | 'D'
+export type FootingType = 'Exposed pad' | 'Embedded RC'
+export type ConcreteGrade = 'C25/30' | 'C28/35' | 'C30/37'
+export type SteelGrade = 'S275' | 'S355'
+export type RebarGrade = 'B500B' | 'B500C'
+export type BoltGrade = '8.8' | '10.9'
+
+export interface DesignParameters {
+  // ── Wind ──
+  /** Basic wind velocity (m/s). Fixed SG NA constant: 20 m/s. */
+  basic_wind_speed: number          // default 20
+  /** Return period in years. User input — default 50yr. */
+  return_period: number             // default 50
+  /** Structure height from ground (m). Drives qp calculation. */
+  structure_height: number | null
+  /** Shelter factor — user-confirmed per site. Default 1.0 (no shelter). */
+  shelter_factor: number            // default 1.0
+  /** Wind zone A/B/C/D per EC1 Table 7.9 — engineering judgement, user-confirmed. */
+  wind_zone: WindZone | null
+  /** Barrier length / barrier height ratio — used to look up cp from EC1 Table 7.9. */
+  lh_ratio: number | null
+
+  // ── Structural geometry ──
+  /** Post spacing (m). Drives tributary area and member design. */
+  post_spacing: number | null
+  /** Subframe spacing (m). Drives Lcr for torsional buckling check. */
+  subframe_spacing: number | null
+
+  // ── Materials ──
+  /** Concrete grade — default C25/30 per PE reports. */
+  concrete_grade: ConcreteGrade     // default 'C25/30'
+  /** Steel grade — default S275 per PE reports. */
+  steel_grade: SteelGrade           // default 'S275'
+  /** Rebar grade */
+  rebar_grade: RebarGrade           // default 'B500B'
+  /** Bolt grade */
+  bolt_grade: BoltGrade             // default '8.8'
+
+  // ── Foundation ──
+  /** Footing type — drives which branch of the foundation module executes. */
+  footing_type: FootingType | null
+  /** Allowable soil bearing pressure (kPa). Default 75 kPa if no site investigation. */
+  allowable_soil_bearing: number    // default 75
+
+  // ── Soil (provisional — user-configurable, not hardcoded) ──
+  // PROVISIONAL: pending SME validation — see PRD Section 2.5
+  /** Soil friction angle φk (degrees). Default 30°. */
+  phi_k: number                     // default 30
+  /** Soil unit weight γs (kN/m³). Default 20. */
+  gamma_s: number                   // default 20
+  /** Soil cohesion c'k (kN/m²). Default 0. */
+  cohesion_ck: number               // default 0
+}
+
 // ─── ProjectContext slices ────────────────────────────────────────────────────
 
 export interface ProjectInfo {

@@ -1,10 +1,12 @@
 import { create } from 'zustand'
-import type { BarrierType, CalibrationData, CodeReference, Polyline, ProjectInfo, SegmentRow, SiteData } from '../types'
+import type { BarrierType, CalibrationData, CodeReference, DesignParameters, Polyline, ProjectInfo, SegmentRow, SiteData } from '../types'
 
 interface ProjectStore {
   project_info: ProjectInfo
   site_data: SiteData
   applicable_codes: CodeReference[]
+  design_parameters: DesignParameters
+  step3_confirmed: boolean
 
   setProjectInfo: (partial: Partial<ProjectInfo>) => void
   setSiteData: (partial: Partial<SiteData>) => void
@@ -18,8 +20,10 @@ interface ProjectStore {
 
   updateSegmentTag: (alignment_id: number, segment_id: string, tag: SegmentRow['tag']) => void
   toggleCode: (en_designation: string) => void
+  setDesignParameters: (partial: Partial<DesignParameters>) => void
   confirmStep1: () => void
   confirmStep2: () => void
+  confirmStep3: () => void
   reset: () => void
 }
 
@@ -31,6 +35,27 @@ const defaultProjectInfo: ProjectInfo = {
   foundation_constraint: '',
   scope_note: '',
   step1_confirmed: false,
+}
+
+// PROVISIONAL: defaults pending SME validation — see PRD Section 2.4 / 2.5
+const defaultDesignParameters: DesignParameters = {
+  basic_wind_speed: 20,
+  return_period: 50,
+  structure_height: null,
+  shelter_factor: 1.0,
+  wind_zone: null,
+  lh_ratio: null,
+  post_spacing: null,
+  subframe_spacing: null,
+  concrete_grade: 'C25/30',
+  steel_grade: 'S275',
+  rebar_grade: 'B500B',
+  bolt_grade: '8.8',
+  footing_type: null,
+  allowable_soil_bearing: 75,
+  phi_k: 30,
+  gamma_s: 20,
+  cohesion_ck: 0,
 }
 
 // Defaults per PRD v4 Section 2.3 — confirmed from PE calculation reports
@@ -109,6 +134,8 @@ export const useProjectStore = create<ProjectStore>((set, get) => ({
   project_info: defaultProjectInfo,
   site_data: defaultSiteData,
   applicable_codes: defaultApplicableCodes,
+  design_parameters: defaultDesignParameters,
+  step3_confirmed: false,
 
   setProjectInfo: (partial) =>
     set((s) => ({ project_info: { ...s.project_info, ...partial } })),
@@ -176,6 +203,9 @@ export const useProjectStore = create<ProjectStore>((set, get) => ({
       ),
     })),
 
+  setDesignParameters: (partial) =>
+    set((s) => ({ design_parameters: { ...s.design_parameters, ...partial } })),
+
   confirmStep1: () =>
     set((s) => ({
       project_info: { ...s.project_info, step1_confirmed: true },
@@ -186,8 +216,10 @@ export const useProjectStore = create<ProjectStore>((set, get) => ({
       site_data: { ...s.site_data, step2_confirmed: true },
     })),
 
+  confirmStep3: () => set({ step3_confirmed: true }),
+
   reset: () =>
-    set({ project_info: defaultProjectInfo, site_data: defaultSiteData, applicable_codes: defaultApplicableCodes }),
+    set({ project_info: defaultProjectInfo, site_data: defaultSiteData, applicable_codes: defaultApplicableCodes, design_parameters: defaultDesignParameters, step3_confirmed: false }),
 }))
 
 // ─── Derived selectors ────────────────────────────────────────────────────────
