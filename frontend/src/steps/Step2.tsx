@@ -10,16 +10,31 @@ const CANVAS_W = 740
 const CANVAS_H = 540
 const CAL_COLOR = '#f59e0b'
 const LINE_COLOR = '#3b82f6'
+const LINE_COLOR_ACTIVE = '#f59e0b'
 const DOT_COLOR = '#22c55e'
+const DOT_COLOR_INACTIVE = '#6b7280'
 const TAG_OPTIONS: SegmentRow['tag'][] = ['Standard', 'Corner', 'Gate', 'End']
 const MIN_ZOOM = 0.3
 const MAX_ZOOM = 10
+const PROXIMITY_THRESHOLD = 10  // canvas px
 
 function pixelDist(a: { x: number; y: number }, b: { x: number; y: number }) {
   return Math.sqrt((b.x - a.x) ** 2 + (b.y - a.y) ** 2)
 }
 
-// Canvas objects for a single polyline
+/** Shortest distance from point (px, py) to line segment (x1,y1)–(x2,y2). */
+function distPointToSegment(
+  px: number, py: number,
+  x1: number, y1: number,
+  x2: number, y2: number,
+): number {
+  const dx = x2 - x1, dy = y2 - y1
+  const lenSq = dx * dx + dy * dy
+  if (lenSq === 0) return Math.sqrt((px - x1) ** 2 + (py - y1) ** 2)
+  const t = Math.max(0, Math.min(1, ((px - x1) * dx + (py - y1) * dy) / lenSq))
+  return Math.sqrt((px - x1 - t * dx) ** 2 + (py - y1 - t * dy) ** 2)
+}
+
 interface PolylineCanvasObjects {
   lines: fabric.Line[]
   dots: fabric.Circle[]
@@ -39,6 +54,7 @@ export default function Step2() {
     undoLastPoint,
     deletePolyline,
     updateSegmentTag,
+    setActiveAlignment,
     confirmStep2,
   } = useProjectStore()
 
@@ -46,10 +62,7 @@ export default function Step2() {
   const [selectedFile, setSelectedFile] = useState<File | null>(null)
   const isPdf = selectedFile?.type === 'application/pdf'
 
-  // PDF.js renders first page → data URL
   const pdf = usePdfRenderer(isPdf ? selectedFile : null, 2)
-
-  // Seed from store so the image is restored when navigating back to this step
   const [imageDataUrl, setImageDataUrl] = useState<string | null>(site_data.site_plan_image)
 
   useEffect(() => {
@@ -70,23 +83,25 @@ export default function Step2() {
   const [calDotObjects, setCalDotObjects] = useState<fabric.Circle[]>([])
   const [calLineObject, setCalLineObject] = useState<fabric.Line | null>(null)
 
-  // Per-polyline canvas objects: Map<polylineId, {lines, dots}>
+  // Per-polyline canvas objects
   const polylinesOnCanvasRef = useRef<Map<number, PolylineCanvasObjects>>(new Map())
 
-  // Which polyline is currently being drawn (null if not drawing)
+  // Which polyline is actively being drawn (null when not drawing)
   const [activePolylineId, setActivePolylineId] = useState<number | null>(null)
 
-  // Stable refs for mouse handler
+  // Stable refs for mouse handler (avoids stale closures in Fabric event callbacks)
   const modeRef = useRef(mode)
   const calClickCountRef = useRef(calClickCount)
   const knownDistanceRef = useRef(knownDistance)
   const calPointsRef = useRef(calPoints)
   const activePolylineIdRef = useRef(activePolylineId)
+  const polylinesRef = useRef(site_data.polylines)
   useEffect(() => { modeRef.current = mode }, [mode])
   useEffect(() => { calClickCountRef.current = calClickCount }, [calClickCount])
   useEffect(() => { knownDistanceRef.current = knownDistance }, [knownDistance])
   useEffect(() => { calPointsRef.current = calPoints }, [calPoints])
   useEffect(() => { activePolylineIdRef.current = activePolylineId }, [activePolylineId])
+  useEffect(() => { polylinesRef.current = site_data.polylines }, [site_data.polylines])
 
   // ── Init Fabric ───────────────────────────────────────────────────────────
 
@@ -205,7 +220,7 @@ export default function Step2() {
     fc.requestRenderAll()
   }
 
-  // ── Click handler: calibration + drawing ─────────────────────────────────
+  // ── Click handler: calibration + drawing + idle polyline selection ────────
 
   useEffect(() => {
     const fc = fabricRef.current
@@ -247,12 +262,33 @@ export default function Step2() {
         }
       } else if (modeRef.current === 'drawing' && activePolylineIdRef.current !== null) {
         addPolylinePoint(activePolylineIdRef.current, pt)
+      } else if (modeRef.current === 'idle') {
+        // Proximity check — select nearest polyline within threshold
+        let closestId: number | null = null
+        let closestDist = PROXIMITY_THRESHOLD
+        for (const polyline of polylinesRef.current) {
+          const pts = polyline.points
+          for (let i = 0; i < pts.length - 1; i++) {
+            const d = distPointToSegment(
+              pt.x, pt.y,
+              pts[i].x, pts[i].y,
+              pts[i + 1].x, pts[i + 1].y,
+            )
+            if (d < closestDist) {
+              closestDist = d
+              closestId = polyline.id
+            }
+          }
+        }
+        if (closestId !== null) {
+          setActiveAlignment(closestId)
+        }
       }
     }
 
     fc.on('mouse:down', onMouseDown)
     return () => { (fc as fabric.Canvas & { off: (event: string, handler: unknown) => void }).off('mouse:down', onMouseDown) }
-  }, [fabricReady, setCalibration, addPolylinePoint])
+  }, [fabricReady, setCalibration, addPolylinePoint, setActiveAlignment])
 
   // ── Cursor ────────────────────────────────────────────────────────────────
 
@@ -262,29 +298,30 @@ export default function Step2() {
     fc.defaultCursor = mode === 'idle' ? 'default' : 'crosshair'
   }, [mode])
 
-  // ── Redraw all polylines when store changes ───────────────────────────────
+  // ── Redraw all polylines — active gets amber highlight ────────────────────
 
   const redrawAllPolylines = useCallback(() => {
     const fc = fabricRef.current
     if (!fc) return
 
-    // Remove old canvas objects for all polylines
     polylinesOnCanvasRef.current.forEach(({ lines, dots }) => {
       lines.forEach((o) => fc.remove(o))
       dots.forEach((o) => fc.remove(o))
     })
     polylinesOnCanvasRef.current.clear()
 
-    // Redraw each polyline from store
     for (const polyline of site_data.polylines) {
       const pts = polyline.points
+      const strokeColor = polyline.is_active ? LINE_COLOR_ACTIVE : LINE_COLOR
+      const strokeW = polyline.is_active ? 3 : 1.5
+      const dotColor = polyline.is_active ? DOT_COLOR : DOT_COLOR_INACTIVE
       const lines: fabric.Line[] = []
       const dots: fabric.Circle[] = []
 
       for (let i = 0; i < pts.length - 1; i++) {
         const ln = new fabric.Line(
           [pts[i].x, pts[i].y, pts[i + 1].x, pts[i + 1].y],
-          { stroke: LINE_COLOR, strokeWidth: 2, selectable: false, evented: false },
+          { stroke: strokeColor, strokeWidth: strokeW, selectable: false, evented: false },
         )
         fc.add(ln)
         lines.push(ln)
@@ -292,7 +329,7 @@ export default function Step2() {
       pts.forEach((p) => {
         const d = new fabric.Circle({
           left: p.x - 4, top: p.y - 4, radius: 4,
-          fill: DOT_COLOR, selectable: false, evented: false,
+          fill: dotColor, selectable: false, evented: false,
         })
         fc.add(d)
         dots.push(d)
@@ -336,7 +373,7 @@ export default function Step2() {
     }
   }, [pdf.dataUrl, setSiteData])
 
-  // ── Calibration actions ───────────────────────────────────────────────────
+  // ── Calibration ───────────────────────────────────────────────────────────
 
   const handleStartCalibration = () => {
     const dist = parseFloat(knownDistance)
@@ -354,12 +391,10 @@ export default function Step2() {
     setMode('calibrating')
   }
 
-  // ── Drawing actions ───────────────────────────────────────────────────────
+  // ── Drawing ───────────────────────────────────────────────────────────────
 
   const handleStartDrawing = () => {
-    startNewPolyline()
-    // The new polyline id will be polylines.length + 1 before the state update,
-    // but after startNewPolyline runs the store length increases. We compute it here.
+    startNewPolyline()  // store: creates polyline, sets it as active_alignment_id
     const nextId = site_data.polylines.length + 1
     setActivePolylineId(nextId)
     setMode('drawing')
@@ -368,6 +403,7 @@ export default function Step2() {
   const handleStopDrawing = () => {
     setMode('idle')
     setActivePolylineId(null)
+    // active_alignment_id stays on the just-completed polyline
   }
 
   const handleUndoPoint = () => {
@@ -376,31 +412,36 @@ export default function Step2() {
     }
   }
 
-  const handleDeletePolyline = (polylineId: number) => {
-    deletePolyline(polylineId)
-    if (activePolylineId === polylineId) {
+  const handleDeleteSelected = () => {
+    const targetId = site_data.active_alignment_id
+    if (targetId === null) return
+    deletePolyline(targetId)
+    if (activePolylineId === targetId) {
       setActivePolylineId(null)
       setMode('idle')
     }
   }
 
   const handleClearAll = () => {
-    // Delete all polylines one by one
-    for (const pl of site_data.polylines) {
-      deletePolyline(pl.id)
-    }
+    const ids = site_data.polylines.map((pl) => pl.id)
+    ids.forEach((pid) => deletePolyline(pid))
     setActivePolylineId(null)
     setMode('idle')
   }
 
   const handleConfirm = () => { confirmStep2(); navigate(`/project/${id}/step/3`) }
 
+  // ── Derived values ────────────────────────────────────────────────────────
+
   const { px_per_m } = site_data.calibration
   const totalSegments = site_data.segment_table.length
-  const totalLength = site_data.segment_table.reduce((s, r) => s + r.length_m, 0)
   const totalVertices = site_data.polylines.reduce((s, p) => s + p.points.length, 0)
   const canConfirm = px_per_m !== null && totalSegments >= 1
   const isLoading = pdf.loading
+
+  const activeAlignmentId = site_data.active_alignment_id
+  const activeSegments = site_data.segment_table.filter((r) => r.alignment_id === activeAlignmentId)
+  const activeTotalLength = activeSegments.reduce((s, r) => s + r.length_m, 0)
 
   return (
     <div className="flex h-full flex-col">
@@ -413,7 +454,8 @@ export default function Step2() {
       </div>
 
       <div className="flex flex-1 overflow-hidden">
-        {/* Left column */}
+
+        {/* ── Left column: canvas + controls ─────────────────────────────── */}
         <div className="flex w-[62%] shrink-0 flex-col gap-4 overflow-y-auto border-r border-border p-5">
 
           {/* Upload row */}
@@ -436,7 +478,8 @@ export default function Step2() {
           </div>
 
           <p className="text-xs text-muted -mt-2">
-            Scroll to zoom · Alt + drag to pan · <button type="button" className="underline hover:text-white" onClick={resetView}>Reset view</button>
+            Scroll to zoom · Alt + drag to pan ·{' '}
+            <button type="button" className="underline hover:text-white" onClick={resetView}>Reset view</button>
           </p>
 
           {/* Canvas */}
@@ -516,6 +559,11 @@ export default function Step2() {
                 className="btn-secondary">
                 Undo Last Point
               </button>
+              <button type="button" onClick={handleDeleteSelected}
+                disabled={activeAlignmentId === null || mode === 'calibrating'}
+                className="btn-secondary">
+                Delete Selected
+              </button>
               <button type="button" onClick={handleClearAll}
                 disabled={site_data.polylines.length === 0}
                 className="btn-secondary">
@@ -527,99 +575,129 @@ export default function Step2() {
                 Drawing Alignment {activePolylineId} — click on the canvas to place vertices.
               </p>
             )}
-            {totalVertices > 0 && (
+            {mode === 'idle' && site_data.polylines.length > 0 && (
               <p className="text-xs text-muted">
-                {site_data.polylines.length} alignment{site_data.polylines.length !== 1 ? 's' : ''} · {totalVertices} vertices · {totalSegments} segments
+                {site_data.polylines.length} alignment{site_data.polylines.length !== 1 ? 's' : ''} · {totalVertices} vert · {totalSegments} seg
+                <span className="ml-2 text-muted/50">· Click a polyline to select</span>
+              </p>
+            )}
+          </div>
+        </div>
+
+        {/* ── Right: per-alignment tab panel ─────────────────────────────── */}
+        <div className="flex flex-1 flex-col overflow-hidden p-5">
+
+          {/* Header */}
+          <div className="mb-3 flex items-baseline justify-between">
+            <p className="text-sm font-semibold text-white">Segment Table</p>
+            {activeAlignmentId !== null && activeSegments.length > 0 && (
+              <p className="text-xs text-muted">
+                Total: <span className="font-semibold text-white">{activeTotalLength.toFixed(2)} m</span>
               </p>
             )}
           </div>
 
-          {/* Alignment list with delete controls */}
-          {site_data.polylines.length > 0 && (
-            <div className="panel space-y-2">
-              <p className="text-xs font-semibold uppercase tracking-wide text-muted">Alignments</p>
-              {site_data.polylines.map((pl) => {
-                const segCount = site_data.segment_table.filter((r) => r.alignment_id === pl.id).length
-                const isActive = activePolylineId === pl.id
-                return (
-                  <div key={pl.id}
-                    className={[
-                      'flex items-center justify-between rounded border px-3 py-2 text-sm',
-                      isActive ? 'border-accent/50 bg-accent/5' : 'border-border',
-                    ].join(' ')}>
-                    <span className={isActive ? 'text-accent font-semibold' : 'text-white'}>
-                      Alignment {pl.id}
-                      <span className="ml-2 text-xs text-muted font-normal">
-                        {pl.points.length} pts · {segCount} seg{segCount !== 1 ? 's' : ''}
-                      </span>
-                    </span>
-                    <button
-                      type="button"
-                      onClick={() => handleDeletePolyline(pl.id)}
-                      className="text-xs text-muted hover:text-danger transition-colors"
-                    >
-                      Delete
-                    </button>
-                  </div>
-                )
-              })}
-            </div>
-          )}
-        </div>
-
-        {/* Right: segment table */}
-        <div className="flex flex-1 flex-col overflow-hidden p-5">
-          <div className="mb-3 flex items-baseline justify-between">
-            <p className="text-sm font-semibold text-white">Segment Table</p>
-            {totalSegments > 0 && (
-              <p className="text-xs text-muted">Total: <span className="font-semibold text-white">{totalLength.toFixed(2)} m</span></p>
-            )}
-          </div>
-
-          {totalSegments === 0 ? (
+          {site_data.polylines.length === 0 ? (
             <div className="flex flex-1 items-center justify-center rounded-lg border border-dashed border-border text-sm text-muted">
-              {px_per_m === null ? 'Calibrate scale first, then draw segments' : 'Draw the barrier alignment to generate segments'}
+              {px_per_m === null
+                ? 'Calibrate scale first, then draw segments'
+                : 'Draw the barrier alignment to generate segments'}
             </div>
           ) : (
-            <div className="flex-1 overflow-y-auto rounded-lg border border-border">
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="border-b border-border bg-panel text-xs font-semibold uppercase tracking-wide text-muted">
-                    <th className="px-3 py-2.5 text-left">Align</th>
-                    <th className="px-3 py-2.5 text-left">ID</th>
-                    <th className="px-3 py-2.5 text-right">Length (m)</th>
-                    <th className="px-3 py-2.5 text-left">Tag</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {site_data.segment_table.map((row) => (
-                    <tr key={`${row.alignment_id}-${row.segment_id}`}
-                      className="border-b border-border/50 hover:bg-white/[0.02]">
-                      <td className="px-3 py-2.5 font-mono text-muted">{row.alignment_id}</td>
-                      <td className="px-3 py-2.5 font-mono font-semibold text-accent">{row.segment_id}</td>
-                      <td className="px-3 py-2.5 text-right font-mono">{row.length_m.toFixed(2)}</td>
-                      <td className="px-3 py-2.5">
-                        <select className="field-input py-1 text-xs" value={row.tag}
-                          onChange={(e) => updateSegmentTag(row.alignment_id, row.segment_id, e.target.value as SegmentRow['tag'])}>
-                          {TAG_OPTIONS.map((t) => <option key={t} value={t}>{t}</option>)}
-                        </select>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+            <div className="flex flex-1 flex-col overflow-hidden rounded-lg border border-border">
+
+              {/* Tab bar */}
+              <div className="flex overflow-x-auto border-b border-border bg-panel/50 shrink-0">
+                {site_data.polylines.map((pl) => {
+                  const segCount = site_data.segment_table.filter((r) => r.alignment_id === pl.id).length
+                  const isActive = pl.id === activeAlignmentId
+                  return (
+                    <button
+                      key={pl.id}
+                      onClick={() => setActiveAlignment(pl.id)}
+                      className={[
+                        'shrink-0 px-4 py-2.5 text-xs font-medium border-b-2 -mb-px transition-colors whitespace-nowrap',
+                        isActive
+                          ? 'border-accent text-white'
+                          : 'border-transparent text-muted hover:text-white',
+                      ].join(' ')}
+                    >
+                      Alignment {pl.id}
+                      {segCount > 0 && (
+                        <span className="ml-1.5 font-normal text-muted/60">({segCount})</span>
+                      )}
+                    </button>
+                  )
+                })}
+              </div>
+
+              {/* Table content */}
+              {activeAlignmentId === null ? (
+                <div className="flex flex-1 items-center justify-center text-sm text-muted">
+                  Select an alignment tab or click a polyline on the canvas
+                </div>
+              ) : activeSegments.length === 0 ? (
+                <div className="flex flex-1 items-center justify-center text-sm text-muted">
+                  {px_per_m === null
+                    ? 'Calibrate scale to see segment lengths'
+                    : 'Add more points to this alignment to generate segments'}
+                </div>
+              ) : (
+                <div className="flex-1 overflow-y-auto">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="border-b border-border bg-panel text-xs font-semibold uppercase tracking-wide text-muted">
+                        <th className="px-3 py-2.5 text-left">ID</th>
+                        <th className="px-3 py-2.5 text-right">Length (m)</th>
+                        <th className="px-3 py-2.5 text-left">Tag</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {activeSegments.map((row) => (
+                        <tr
+                          key={`${row.alignment_id}-${row.segment_id}`}
+                          className="border-b border-border/50 hover:bg-white/[0.02]"
+                        >
+                          <td className="px-3 py-2.5 font-mono font-semibold text-accent">{row.segment_id}</td>
+                          <td className="px-3 py-2.5 text-right font-mono">{row.length_m.toFixed(2)}</td>
+                          <td className="px-3 py-2.5">
+                            <select
+                              className="field-input py-1 text-xs"
+                              value={row.tag}
+                              onChange={(e) =>
+                                updateSegmentTag(row.alignment_id, row.segment_id, e.target.value as SegmentRow['tag'])
+                              }
+                            >
+                              {TAG_OPTIONS.map((t) => <option key={t} value={t}>{t}</option>)}
+                            </select>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
             </div>
           )}
 
+          {/* Footer: confirm */}
           <div className="mt-4 flex items-center justify-between border-t border-border pt-4">
             <p className="text-xs text-muted">
-              {canConfirm ? 'Scale calibrated and alignment drawn. Ready to confirm.' : 'Complete scale calibration and draw at least one segment.'}
+              {canConfirm
+                ? 'Scale calibrated and alignment drawn. Ready to confirm.'
+                : 'Complete scale calibration and draw at least one segment.'}
             </p>
-            <button type="button" onClick={handleConfirm} disabled={!canConfirm || site_data.step2_confirmed} className="btn-success">
+            <button
+              type="button"
+              onClick={handleConfirm}
+              disabled={!canConfirm || site_data.step2_confirmed}
+              className="btn-success"
+            >
               {site_data.step2_confirmed ? 'Confirmed ✓' : 'Confirm Alignment →'}
             </button>
           </div>
         </div>
+
       </div>
     </div>
   )

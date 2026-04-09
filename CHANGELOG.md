@@ -1,5 +1,83 @@
 # CHANGELOG
 
+## [0.6.0] — 2026-04-09
+
+### Added
+- `backend/app/calculation/` package — new engineering calculation engine
+- `backend/app/calculation/constants.py` — `APPLICABLE_CODES` (7 codes, cited verbatim in PE reports), `SG_NA` (Singapore NA constants: vb0=20m/s, ρ=1.194kg/m³, kl=1.0, kr=0.19, z0=0.05m, zmin=2m, cp_net=1.2), DA1-C1/C2/SLS partial factor dicts
+- `backend/app/calculation/wind.py` — `compute_qp(ze)` (EC1 Clause 4.3 chain: cr→vm→Iv→qp) and `compute_design_pressure(ze, ψs)` (qp × cp_net × ψs). P105 validation: ze=12.7m, ψs=0.5 → qp=0.598kPa, design_pressure=0.36kPa ✓
+- `backend/app/calculation/steel.py` — `compute_steel_design(design_pressure, post_spacing, subframe_spacing, post_length)`: iterates parts library ascending by Wpl_y, returns first section with UR_moment < 1.0 AND UR_deflection < 1.0. Implements EC3 Clause 6.3.2.3 LTB (αLT=0.34, λLT0=0.4, β=0.75, Lcr=subframe_spacing) and δ=wL⁴/(8EI) deflection (limit L/65)
+- `backend/app/calculation/foundation.py` — `compute_foundation(...)`: branches by footing_type. Branch A (Exposed pad): μ=0.3 sliding, Meyerhof eccentric bearing. Branch B (Embedded RC): tanφd friction, passive earth (evaluated to 0 per P105), EC7 Annex D.4 drained bearing capacity with Nγ=1.5(Nq-1)tanφ (P105 formula). All three combinations: SLS, DA1-C1, DA1-C2
+- `backend/app/routers/calculate.py` — `POST /api/calculate`: full chain wind→steel→foundation. Pydantic request/response models. SLS forces derived from steel results (M_Ed/1.5, V_Ed/1.5)
+- `backend/app/data/shelter_factor_table.json` — stub placeholder for EN 1991-1-4 Figure 7.20 digitisation (not yet implemented; feed ψs directly for P105 runs)
+
+### Changed
+- `backend/app/main.py` — registered `calculate` router alongside `extract` router
+
+### Notes
+- Steel section selection iterates all 107 UB sections sorted ascending by Wpl_y; lightest passing section is returned
+- Foundation bearing uses the P105 Nγ formula: 1.5(Nq-1)tanφ — see code-reference.md Section 8 item 3 for alternative
+- Passive earth resistance set to 0 (not relied upon) per P105 T1/T2 confirmed practice; implement when PE confirms it applies
+- Shelter factor lookup (Figure 7.20) deferred — shelter_factor_table.json is a stub; feed ψs=0.5 directly for P105 validation
+
+---
+
+## [0.5.0] — 2026-04-09
+
+### Changed
+- Step 2: replaced combined segment table with per-alignment tab panel — one tab per alignment, each showing only that alignment's segments (ID, Length, Tag)
+- Step 2: canvas polylines now highlight when the corresponding tab is selected (amber, strokeWidth 3; inactive polylines render in blue at strokeWidth 1.5 with grey dots)
+- Step 2: clicking a polyline on the canvas activates its tab (bidirectional — 10 px proximity threshold in canvas coordinates)
+- Step 2: "Delete" per-alignment-row replaced with "Delete Selected" control button acting on the active alignment
+- Zustand store: `startNewPolyline` now sets `is_active: true` on the new polyline and `active_alignment_id` to its id; clears `is_active` on all others
+- Zustand store: `deletePolyline` now updates `active_alignment_id` to the last remaining polyline (or null) when the deleted polyline was active
+
+### Added
+- `is_active: boolean` to `Polyline` interface (`frontend/src/types/index.ts`)
+- `active_alignment_id: number | null` to `SiteData` interface and store default (`frontend/src/types/index.ts`, `frontend/src/store/projectStore.ts`)
+- `setActiveAlignment(id)` action in Zustand store — sets `active_alignment_id` and syncs `is_active` across all polylines
+
+### Notes
+- Segment IDs (A, B, C…) reset per alignment — unchanged
+- Only one alignment active/highlighted at a time
+- `activePolylineId` (local component state) tracks the polyline currently being drawn; `active_alignment_id` (store) tracks the selected tab/highlight — they are separate concepts
+
+---
+
+## [0.4.0] — 2026-04-09
+
+### Changed
+- Removed `applicable_codes` slice from Zustand store (`frontend/src/store/projectStore.ts`)
+- Removed `CodeReference` interface from `frontend/src/types/index.ts`
+- Removed Code Selection tab from Step 3; Step 3 now opens directly on Design Parameters
+
+### Added
+- `ProjectMeta` interface (`frontend/src/types/index.ts`) — `id`, `created_by`, `last_modified_by`, `created_at`, `updated_at`
+- `meta` slice to ProjectContext (`frontend/src/store/projectStore.ts`) — `initMeta(createdBy)` generates UUID + timestamps on project creation; `setMeta` for partial updates
+- `created_by` and `updated_at` fields on `Project` interface (`frontend/src/types/index.ts`)
+- Creator name prompt modal on Overview page New Project button — sets `meta.created_by` and `meta.last_modified_by`, generates stub UUID for `meta.id`, sets timestamps, then navigates to `/project/new`
+- Attribution columns (Created by, Date) visible on Projects Library and Recent Projects rows
+- Mock data in `useProjects()` updated with `created_by` and `updated_at` fields
+
+### Notes
+- `meta.created_by` is free-text — no authentication behind it
+- Upgrade path: when user accounts are added, populate `created_by`/`last_modified_by` automatically from the logged-in session
+
+---
+
+## [0.3.1] — 2026-04-09
+
+### Built (unlogged)
+- `code-reference.md` — engineering code reference (Eurocodes, SG NA, wind formulas, validation targets)
+- `unused.md` — archived earlier PRD draft; retained for reference
+- `backend/app/data/` — new data directory added under backend (contents TBD)
+- `union-noise-prd-v3.md` deleted; `union-noise-prd-v4.md` updated with user attribution spec, removal of `applicable_codes`, and `ProjectContext` meta schema
+
+### Notes
+- PRD v4 introduces two store-breaking changes: `applicable_codes` removed, `meta` slice added
+
+---
+
 ## [0.3.0] — 2026-04-06
 
 ### Added

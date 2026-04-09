@@ -18,6 +18,8 @@ const MOCK_PROJECTS: Project[] = [
     barrier_type: 'Type 1',
     location: 'Clementi Ave 3, Singapore',
     created_at: '2026-03-15',
+    updated_at: '2026-03-20T09:00:00Z',
+    created_by: 'Ahmad Razali',
     status: 'complete',
   },
   {
@@ -26,6 +28,8 @@ const MOCK_PROJECTS: Project[] = [
     barrier_type: 'Type 1',
     location: 'Bayshore Road, Singapore',
     created_at: '2026-03-28',
+    updated_at: '2026-03-29T14:30:00Z',
+    created_by: 'Priya Nair',
     status: 'draft',
   },
   {
@@ -34,6 +38,8 @@ const MOCK_PROJECTS: Project[] = [
     barrier_type: 'Type 2',
     location: 'Punggol Field, Singapore',
     created_at: '2026-04-01',
+    updated_at: '2026-04-02T11:15:00Z',
+    created_by: 'Wei Liang',
     status: 'draft',
   },
 ]

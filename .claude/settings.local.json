@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python -c ':*)",
+      "Bash(dir \"d:\\\\Projects\\\\GitHub\\\\UnionNoise\\\\backend\\\\app\")",
+      "Bash(dir \"d:\\\\Projects\\\\GitHub\\\\UnionNoise\\\\backend\\\\app\\\\data\")"
+    ]
+  }
+}

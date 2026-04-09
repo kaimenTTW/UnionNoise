@@ -6,18 +6,6 @@ export type SegmentTag = 'Standard' | 'Corner' | 'Gate' | 'End'
 
 export type StepStatus = 'not-started' | 'in-progress' | 'complete'
 
-// ─── Code references ─────────────────────────────────────────────────────────
-
-export interface CodeReference {
-  /** Formal EN designation — stored in ProjectContext, cited verbatim in PE report Section 3 */
-  en_designation: string    // e.g. "EN 1990:2002"
-  /** Human-readable Eurocode label shown as subtitle */
-  eurocode_label: string    // e.g. "Eurocode 0 — Basis of Structural Design"
-  /** Brief description of what this code governs */
-  governs: string
-  selected: boolean
-}
-
 // ─── Project list (Overview page) ────────────────────────────────────────────
 
 export interface Project {
@@ -26,7 +14,19 @@ export interface Project {
   barrier_type: BarrierType
   location: string
   created_at: string        // ISO date string e.g. "2026-03-15"
+  updated_at: string        // ISO timestamp
+  created_by: string        // Free-text display name
   status: 'draft' | 'complete'
+}
+
+// ─── Project meta ─────────────────────────────────────────────────────────────
+
+export interface ProjectMeta {
+  id: string
+  created_by: string
+  last_modified_by: string
+  created_at: string        // ISO timestamp
+  updated_at: string        // ISO timestamp
 }
 
 // ─── Design parameters ───────────────────────────────────────────────────────
@@ -110,6 +110,7 @@ export interface CalibrationData {
 export interface Polyline {
   id: number                          // Alignment number: 1, 2, 3…
   points: { x: number; y: number }[]  // Canvas coordinates
+  is_active: boolean                  // Whether this alignment is selected/highlighted on canvas
 }
 
 export interface SegmentRow {
@@ -127,6 +128,8 @@ export interface SiteData {
   calibration: CalibrationData
   /** Multiple independent alignments drawn on the canvas */
   polylines: Polyline[]
+  /** Which alignment tab/polyline is currently selected */
+  active_alignment_id: number | null
   /** Auto-generated from polylines + calibration — flattened across all alignments */
   segment_table: SegmentRow[]
   step2_confirmed: boolean

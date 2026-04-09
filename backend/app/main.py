@@ -6,7 +6,7 @@ All LLM calls use LiteLLM so the provider is swappable via env vars.
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.routers import extract
+from app.routers import calculate, extract
 
 app = FastAPI(
     title="Union Noise API",
@@ -29,6 +29,7 @@ app.add_middleware(
 )
 
 app.include_router(extract.router)
+app.include_router(calculate.router)
 
 
 @app.get("/health")

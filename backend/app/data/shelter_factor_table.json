@@ -1,0 +1,6 @@
+{
+  "_note": "Digitised EN 1991-1-4 Figure 7.20 — shelter factor ψs for free-standing walls and fences. Lookup by (x/h, solidity φ). STUB — chart not yet digitised. Feed ψs=0.5 directly for P105 validation runs. See PRD Section 2.4 and code-reference.md Section 3.4.",
+  "_status": "STUB — Figure 7.20 must be manually digitised before shelter factor lookup can run for general projects",
+  "_structure": "For each φ curve: list of [x_over_h, psi_s] pairs, sorted by ascending x/h. Interpolate linearly.",
+  "curves": {}
+}
