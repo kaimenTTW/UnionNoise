@@ -44,6 +44,17 @@ An earlier demo that jumped directly from requirements to AutoCAD-style output w
 | Professional Engineer (PE) | Signs off on design reports for submission | Reviews and endorses the design report; introduction and summary require PE signature |
 | Client Leadership (Ricky) | Founder of Union Noise | Evaluates whether the system delivers tangible business value |
 
+### User Management (confirmed from client meeting, April 2026)
+
+- **No login or authentication required** — free access for all users within the organisation
+- **Project attribution is required** — every project record must store:
+  - `created_by` — display name or identifier of who created the project
+  - `last_modified_by` — display name of who last edited the project
+  - `created_at` and `updated_at` timestamps
+- Attribution is shown on the Overview page (Projects Library rows and Recent Projects)
+- For the prototype stub: `created_by` and `last_modified_by` are free-text fields entered by the user on project creation — no authentication system behind them
+- Upgrade path: when user accounts are introduced, these fields are populated automatically from the logged-in session
+
 ---
 
 ## 3. System Architecture — Three-Layer Model
@@ -116,117 +127,118 @@ Changing an upstream parameter (e.g., wind speed) must propagate through the ent
 
 #### 2.3 Code Clause References
 
-**Placement in workflow:** Code selection is the first action in Step 3 — Design Workspace, before any calculation runs. The confirmed codes govern the calculation engine and are cited in Section 3 of the PE submission report.
+**Decision (confirmed from client meeting, April 2026):** Code selection is **removed as a user-facing step**. All designs must comply with the same set of codes — presenting a checklist implies the engineer could deselect a mandatory code, which is not appropriate. The applicable codes are fixed constants embedded in the calculation engine and cited automatically in the PE report.
 
-**UI pattern:** Multi-select checklist. Codes pre-selected based on project type (temporary barrier defaults below). Engineer confirms or adjusts before proceeding. Cannot run calculations until codes are confirmed.
+**Applicable codes (fixed for all projects — not user-selectable):**
 
-| Primary Label (EN Designation) | Subtitle (Eurocode number) | Governs | Default State |
-|---|---|---|---|
-| EN 1990:2002 | Eurocode 0 — Basis of Structural Design | Basis of structural design | ✅ Pre-selected (every project) |
-| EN 1991-1-1 to 1-7 | Eurocode 1 — Actions on Structures | Actions on structures including wind | ✅ Pre-selected (every project) |
-| EN 1992-1-1:2004, EN 1992-1-2:2004, EN 1992-2:2005, EN 1992-3:2006 | Eurocode 2 — Design of Concrete Structures | Design of concrete structures | ✅ Pre-selected (every project) |
-| EN 1993-1-1 to 1-12 (incl. EN 1993-1-8:2005) | Eurocode 3 — Design of Steel Structures | Design of steel structures | ✅ Pre-selected (every project) |
-| EN 1997-1:2004 | Eurocode 7 — Geotechnical Design | Foundation design (DA1C1, DA1C2) | ✅ Pre-selected (every project) |
-| NA to SS EN 1991-1-4:2009 | Singapore National Annex | SG-specific parameters (terrain, wind, etc.) | ✅ Pre-selected (every project) |
-| SS 602:2014 | — | Noise control on construction sites | ☐ Optional (acoustic requirements) |
+| EN Designation | Eurocode | Governs |
+|---|---|---|
+| EN 1990:2002 | Eurocode 0 — Basis of Structural Design | Basis of structural design |
+| EN 1991-1-1 to 1-7 | Eurocode 1 — Actions on Structures | Actions on structures including wind |
+| EN 1992-1-1:2004 to EN 1992-3:2006 | Eurocode 2 — Design of Concrete Structures | Design of concrete structures |
+| EN 1993-1-1 to 1-12 (incl. EN 1993-1-8:2005) | Eurocode 3 — Design of Steel Structures | Design of steel structures |
+| EN 1997-1:2004 | Eurocode 7 — Geotechnical Design | Foundation design (DA1C1, DA1C2) |
+| NA to SS EN 1991-1-4:2009 | Singapore National Annex | SG-specific parameters |
 
-**UI implementation note:** Each checklist row displays the **EN designation as the primary label** (larger/bolder text) with the **Eurocode number and description as a subtitle** below it. Both are shown to the user. The EN designation is what gets stored in ProjectContext and cited verbatim in Section 3 of the PE submission report.
+**Implementation:** These are stored as constants in the calculation engine backend. They are cited verbatim in Section 3 of the PE submission report. No UI selection required. The Step 3 code selection panel previously specced is removed.
 
-```typescript
-interface CodeReference {
-  en_designation: string    // primary — e.g. "EN 1990:2002"
-  eurocode_label: string    // subtitle — e.g. "Eurocode 0 — Basis of Structural Design"
-  governs: string
-  selected: boolean
-}
-```
+> **Impact on Step 3:** Step 3 now opens directly on the Design Parameters tab, not a code selection tab. The applicable_codes Zustand slice is replaced by a static constant in the backend — remove it from the frontend store.
 
-> **Source:** Confirmed from PE calculation reports (Lawson Chung, Civil PE 5703; Lim Han Chong, Civil PE 4382). All four Eurocodes plus SG NA are used on every standard temporary barrier project. EN 1997 (EC7) added based on geotechnical design checks confirmed in foundation module. EN designations confirmed from Eurocode document filenames provided by client.
+#### 2.4 Wind Pressure Calculation ✅ CONFIRMED (P105 PE calculation reports, Lim Han Chong)
 
-> **Action for SME sessions:** Confirm whether the Singapore National Annex modifies any specific coefficients used in the calculation engine (terrain category, Cprob parameters K and n, load combination factors).
-
-#### 2.4 Wind Pressure Calculation ✅ CONFIRMED (multiple PE calculation reports)
+**Reference implementation:** P105 Punggol project (PE Lim Han Chong, PE 4382). All values below reproduce confirmed P105 outputs. See `code-reference.md` Section 3 for full clause citations.
 
 **Sources:**
-- PE's Design Calculation Report, Type 1 6mH TNCB on embedded footing, PE Lawson Chung, March 2026 (RM project)
-- PE's Design Calculation Report, Type 1 6mH TNCB on exposed footing, PE Lawson Chung, Jan 2026 (Faber Walk)
-- PE's Design Calculation Report, Type 2A 12.736mH TNCB on embedded footing, PE Lim Han Chong / Han Engineering, Nov 2023 (P105 Punggol)
-
-All three reports use the same EC1 equation 4.2 (Cprob) framework and EC1 Table 7.9 pressure coefficients. The differences between reports are systematic and driven by project inputs, not by PE discretion.
+- PE Calc Report, Type 1 12mH above ground footing, PE Lim Han Chong, Mar 2023 (P105 T1) ← primary
+- PE Calc Report, Type 1 12mH embedded footing, PE Lim Han Chong, Jun 2023 (P105 T2) ← primary
+- PE Calc Report, Type 2A 12.736mH embedded footing, PE Lim Han Chong, Nov 2023 (P105 T2A)
 
 ---
 
 **Step 1 — Peak velocity pressure qp (height-dependent, not a fixed constant):**
 
-Uses EC1 Clause 4.3 (roughness factor, turbulence, mean velocity) with Singapore National Annex. **qp must be computed dynamically from project inputs** — it is not a fixed value.
+Uses EC1 Clause 4.3 chain with Singapore National Annex. **qp must be computed dynamically — it is not a fixed value.**
 
 Fixed constants (SG NA):
-- Basic wind velocity: vb0 = 20 m/s
-- Air density: ρ = 1.194 kg/m³
-- Terrain category: II (z0 = 0.05 m, zmin = 2 m)
-- Orography factor: Co(ze) = 1.0 (flat terrain default)
-- Cprob parameters: K = 0.2, n = 0.5 (EC1 recommended)
+- Basic wind velocity: vb0 = 20 m/s (NA 2.4)
+- Air density: ρ = 1.194 kg/m³ (NA 2.18)
+- Terrain category II: z0 = 0.05 m, zmin = 2 m (NA Table NA.1)
+- Orography factor: Co(ze) = 1.0 (flat terrain default, EC1 Clause 4.3.4)
+- Turbulence factor: kl = 1.0 (NA 2.16)
 
-Project-specific inputs that drive qp:
-- **Return period** — directly controls the Cprob probability factor. Confirmed values seen in practice: 50 years (standard), 10 years (shorter-duration projects), 5 years (short-term site works). The return period must be a user-editable input with a default of 50 years. ⚠️ PROVISIONAL: confirm default with client/SME for each project type.
-- **Structure height ze** — roughness factor cr(z) and turbulence Iv(z) are height-dependent. At 6mH the simplified SG NA approach gives qp ≈ 0.394–0.435 kPa depending on return period; at 12.736mH the full EC1 chain gives qp ≈ 0.599 kPa. Do not hardcode 0.394 kPa as a constant.
+Project-specific inputs:
+- **Structure height ze** — drives cr(z) and Iv(z). Do not hardcode qp.
+- **Return period** — user-editable input, default 50 years. Shorter durations (5yr, 10yr) confirmed in practice for temporary works.
 
 EC1 Clause 4.3 computation chain:
 ```
-kr = 0.19 × (z0 / 0.05)^0.07
-cr(z) = kr × ln(ze / z0)             for zmin ≤ ze ≤ 200m
-vm(z) = cr(z) × Co(z) × vb           mean wind velocity
-Iv(z) = kl / (Co(z) × ln(ze / z0))   turbulence intensity  (kl=1, SG NA)
+kr = 0.19 × (z0 / 0.05)^0.07 = 0.19        (constant for SG terrain category II)
+cr(z) = kr × ln(ze / z0)                     EC1 Clause 4.3.2
+vm(z) = cr(z) × Co(z) × vb                  EC1 Clause 4.3.1
+Iv(z) = kl / (Co(z) × ln(ze / z0))          EC1 Clause 4.4
 qp(ze) = [1 + 7×Iv(z)] × 0.5 × ρ × vm(z)²
 ```
 
 Reference outputs for validation (do not hardcode):
-| Scenario | ze | Return period | qp |
-|---|---|---|---|
-| RM project (embedded footing) | 6m | 50yr | 0.394 kPa |
-| Faber Walk (exposed footing) | 6m | 5yr | 0.435 kPa |
-| P105 Punggol | 12.74m | ~50yr | 0.599 kPa |
+| Scenario | ze | qp |
+|---|---|---|
+| P105 T1/T2 (12.7m) | 12.7m | 598.48 N/m² = 0.598 kPa |
+| RM project (6mH, 50yr) | 6m | 0.394 kPa |
 
 ---
 
-**Step 2 — Design pressure using EC1 Table 7.9 (free-standing walls and parapets):**
+**Step 2 — Wind pressure coefficient cp,net:**
 
-Pressure coefficients vary by zone (A/B/C/D) and l/h ratio (barrier length to height):
+✅ CONFIRMED for P105: noise barrier panels are treated as **porous**.
 
-| Zone | l/h < 3 | l/h = 5 | l/h > 10 |
-|------|---------|---------|---------|
-| A | 2.3 | 2.9 | 3.4 |
-| B | 1.4 | 1.8 | 2.1 |
-| C | 1.2 | 1.4 | 1.7 |
-| D | 1.2 | 1.2 | 1.2 |
+```
+cp,net = 1.2    (EN 1991-1-4 Table 7.9 — porous free-standing wall)
+```
 
-(Values above are for barriers without return. With return: A=2.1, B=1.8, C=1.4, D=1.2)
+This is the confirmed treatment for TNCB panels in all P105 reports. The zone-based (A/B/C/D) approach from Table 7.9 applies to solid walls and is not used for porous panel barriers in the P105 methodology.
+
+> ⚠️ NOTE: Faber Walk report (Lawson Chung) uses Zone D approach. This is a noted inter-PE difference — does not affect P105 prototype but will need resolution for general use. See `code-reference.md` Section 8.
 
 ---
 
-**Step 3 — Apply shelter factor:**
+**Step 3 — Shelter factor ψs (derived value — not a user-entered constant):**
 
-Shelter factor is a site-specific multiplier applied to qp before computing design pressure. Default = 1.0 (no shelter reduction). Must remain a user input per project.
+ψs is derived from EN 1991-1-4 Section 7.4.2 and Figure 7.20. It must never be entered as a raw number by the user — it is always computed from physical site measurements.
 
-Confirmed values seen in practice:
-- 1.0 — open site, no shelter (RM and Faber Walk projects)
-- 0.5 — sheltered site (P105 Punggol, LTA tunnel environment)
+**UI flow:**
+- Boolean toggle: "Is there a sheltering structure upwind?" Yes / No
+- If **No** → ψs = 1.0 (no reduction applied)
+- If **Yes** → additional fields presented:
+  - x — spacing from barrier to upwind sheltering structure (m), user enters
+  - φ — solidity ratio of upwind structure, dropdown: 0.8 / 0.9 / 1.0
+    (φ = 1.0 for solid building wall — most common case)
+  - h — taken automatically from barrier height already entered
+  - System computes: ratio = x / h
+  - System looks up ψs from `backend/app/data/shelter_factor_table.json`
+    (digitised EN 1991-1-4 Figure 7.20, interpolated from x/h and φ)
+  - Displays derived ψs for user confirmation before proceeding
 
-PE uses Google Maps to measure distances to surrounding structures to determine the appropriate shelter factor. The system should prompt the user to confirm this value explicitly.
+**Restrictions (EN 1991-1-4 Section 7.4.2):**
+- φ ≤ 0.8: treat upwind structure as plane lattice — shelter factor method does not apply
+- Shelter factor does NOT apply in end zones (within distance h from free end of barrier)
+
+**P105 reference value:** x/h ratio producing ψs = 0.5 at φ = 1.0 (LTA tunnel environment). Used as validation input — feed ψs = 0.5 directly for P105 reproduction run.
+
+**Implementation dependency:** `shelter_factor_table.json` must be digitised from EN 1991-1-4 Figure 7.20 before this module can run on general projects. For P105 validation, ψs = 0.5 is hardcoded as a known input.
 
 ---
 
 **Governing design pressure:**
 
 ```python
-# CONFIRMED across 3 PE reports
-# Step 1: compute qp dynamically from return_period, structure_height, terrain_category
-# Step 2: look up cp from EC1 Table 7.9 based on user-confirmed zone and l/h ratio
-# Step 3: apply shelter factor (user input, default 1.0)
-# design_pressure = qp * cp * shelter_factor
+# CONFIRMED — P105 T1/T2 reports
+# Step 1: compute qp dynamically from structure_height, return_period
+# Step 2: cp,net = 1.2 (porous panel treatment)
+# Step 3: ψs derived from x/h lookup (or 1.0 if no shelter)
+# design_pressure = qp × cp,net × ψs
+#
+# P105 validation: 0.598 × 1.2 × 0.5 = 0.36 kPa ✓
 ```
-
-The zone selection (A/B/C/D) and l/h ratio are engineering judgements that the system must present to the user for confirmation. Do not auto-select. The difference between Zone A and Zone D can be 3× — this is why engineering judgement governs zone choice, not the raw calculation (meeting note, 2 Apr 2026).
 
 > **Note on effective length Lcr for torsional buckling:** Confirmed across reports that Lcr = subframe spacing (not post height, not a fixed constant). At 3m post spacing with 1.5m subframe: Lcr = 1500mm. At 6m post spacing: Lcr = 1500mm (same subframe). The calculation engine must derive Lcr from the subframe_spacing input, not hardcode it.
 
@@ -304,15 +316,19 @@ An aggregation view combining results from all calculations:
 - Bolt bearing
 - Plate bending
 - Secondary plate
-- Weld (governing check — UR 0.92 in sample)
+- Weld (governing check)
 - Rod bond (bolt embedment)
 - Lifting hook tension
 - Lifting hook pullout
 - Lifting hole shear (edge distance)
 - Subframe bending
+- G clamp capacity (factored wind force per clamp vs tested failure load — P105 confirmed)
 - Foundation sliding (SLS, DA1C1, DA1C2)
 - Foundation overturning (SLS, DA1C1, DA1C2)
 - Concrete bearing
+- Base plate bearing (compression resistance)
+
+> **G clamp check note:** Uses failure load from Singapore Test Services test report (STS Report 10784-0714-02391-8-MEME, Aug 2014). Failure load = 23.29 kN for Fixed Beam Clamp 48.6. This is a proprietary Hebei Jinbiao component check — the test report value must be stored in the parts library, not hardcoded.
 
 #### 2.8 Cutting List and Material Optimization
 
@@ -486,21 +502,37 @@ Bearing Check — Full Meyerhof (EC7 Annex D):
   UR: q_max / qu < 1.0
 
 Soil parameters (all user-configurable, not hardcoded):
-  φk = 30° (provisional default — confirm per site investigation)
-  γs = 20 kN/m³ (provisional default — 19 kN/m³ seen in P105)
-  c'k = 0 kN/m² (provisional default — 2 kN/m² seen in P105)
-  # PROVISIONAL: pending SME validation — see PRD Section 2.5
+  φk = 30° (confirmed in P105)
+  γs = 19 kN/m³ (confirmed in P105)
+  c'k = 5 kN/m² (confirmed in P105 — note: earlier reports show c'k=0, site-specific)
+  Nγ = 1.5 × (Nq-1) × tanφ  (P105 T1/T2 confirmed — see code-reference.md Section 8 for alternative)
+  # PROVISIONAL: soil parameters are site-specific — user must confirm per project
 ```
 
 ---
 
-**Lifting Hook (✅ confirmed)**
+**G Clamp Check (✅ confirmed — P105 T1/T2)**
 ```
-Factored load:      F_factored = (concrete_weight / n_hooks) × 1.35
-Tensile strength:   T = A_s × f_yd = (π/4 × φ²) × (f_yk / 1.15)
-Tension UR:         F_factored / T < 1.0
-Pullout resistance: F_pullout = f_ctd × perimeter × embedment_per_leg × n_legs
-Pullout UR:         F_factored / F_pullout < 1.0
+Total wind force:   F_wind = design_pressure_external × barrier_height × post_spacing
+                    Note: uses external wind pressure (0.45 kPa in P105), not
+                    design_pressure after shelter factor reduction
+Factored load:      F_factored = F_wind × 1.5
+Load per clamp:     F_clamp = F_factored / n_clamps_per_post
+Check:              F_clamp < failure_load_from_test_report
+                    failure_load = 23.29 kN (STS test report, Fixed Beam Clamp 48.6)
+                    stored in parts library — not hardcoded
+# PROVISIONAL: confirm whether shelter factor applies to external pressure for clamp check
+```
+
+**Lifting Hook (✅ confirmed — P105)**
+```
+Factored weight:    W_factored = W_footing × 1.5
+Load per hook:      F_hook = W_factored / n_hooks
+Rebar hook (H20 high yield bar, fub = 500 N/mm²):
+  Tension:          FT,Rd = k2 × fub × As / γM2    k2=0.9, γM2=1.25
+  Shear:            Fr = αv × As × fub / γM2
+Anchorage length:   L_required = F_hook / (fbd × π × D)
+                    fbd = 2.25 × η1 × η2 × fctd    (EC2 Clause 3.1.6)
 ```
 
 **Lifting Hole (✅ confirmed)**
@@ -511,15 +543,24 @@ Factored load:      F = post_weight × 1.5
 UR:                 F / V_Rd < 1.0
 ```
 
-**Subframe Check (✅ confirmed)**
+**Subframe Check (✅ confirmed — P105)**
 ```
-Factored moment:    M_Ed = (1.5/12) × w × L_subframe × L_subframe       [kNm]
-Section modulus:    Z = π × d³ / 32  (circular GI pipe approximation)
+Section:            CHS 48.3×2.2 GI pipe, fy = 400 N/mm² (galvanised steel)
+Section class:      Class 2 — use elastic modulus Wel, not plastic Wpl
+
+Factored moment:    M_Ed = (1.5/10) × w × L_subframe²              [kNm]
+                    (continuous beam assumption — confirmed P105 T1/T2)
+                    # NOTE: /12 seen in Faber Walk report (fixed-end assumption)
+                    # P105 uses /10 — use this for prototype
+                    # PROVISIONAL: confirm end condition with PE for general use
+
+Wind UDL on subframe: w = design_pressure × subframe_spacing        [kN/m]
+Section modulus:    Z = Wel (from section table) or π×d³/32 (approx)
 Stress:             σ = M_Ed / Z
 UR:                 σ / f_y < 1.0
 ```
 
-> **Note for Claude Code:** The formula chain is confirmed correct for Type 1 and Type 2A at both 6mH and 12mH+ heights. The foundation module branches explicitly by footing_type. The wind module computes qp dynamically from project inputs — do not hardcode 0.394 kPa. All soil parameters, return period, shelter factor, and concrete grade are user-configurable inputs. Member selection (which UB section) is determined by iterating through the parts library until UR < 1.0 for all checks.
+> **Note for Claude Code:** P105 is the reference implementation. Validation targets: feed P105 T1 inputs → reproduce M_Ed=97.76 kNm, UB356×127×33, Mb,Rd=112.90 kNm. Feed P105 T2 inputs → reproduce M_Ed=130.31 kNm, UB406×140×39, Mb,Rd=133.33 kNm. All P105 constants are confirmed — no placeholders needed for these modules. For shelter factor, feed ψs=0.5 directly for validation run; full x/h lookup required for general use. See `code-reference.md` for full clause citations and section properties.
 
 
 
@@ -723,14 +764,15 @@ ProjectContext:
     type_of_footing: str
     project_constraints: dict  # PE-specific or project-specific overrides
 
-  # --- Code references ---
+  # --- Code references (fixed constants — not user-selectable) ---
+  # See Section 2.3. Codes are embedded in the calculation engine and
+  # cited automatically in the PE report. No user input required.
   applicable_codes:
-    selected_clauses: list[code_clause_reference]
-    wind_code: str  # e.g., "SS EN 1991-1-4 + SG NA"
-    steel_code: str  # e.g., "SS EN 1993-1-1"
-    concrete_code: str  # e.g., "SS EN 1992-1-1"
-    geotechnical_code: str  # e.g., "SS EN 1997-1"
-    basis_of_design: str  # e.g., "SS EN 1990"
+    wind_code: str       # "EN 1991-1-4 + NA to SS EN 1991-1-4:2009"  (constant)
+    steel_code: str      # "EN 1993-1-1, EN 1993-1-8"                  (constant)
+    concrete_code: str   # "EN 1992-1-1"                               (constant)
+    geotechnical_code: str  # "EN 1997-1"                              (constant)
+    basis_of_design: str    # "EN 1990:2002"                           (constant)
 
   # --- Wind analysis outputs ---
   # ✅ CONFIRMED: formula and approach confirmed from PE calculation report (Lawson Chung, March 2026)
@@ -1050,19 +1092,31 @@ All Claude API calls in the prototype go **frontend → FastAPI backend → Clau
 **Step 2 — Site Interpretation (FUNCTIONAL)**
 - Site plan image upload (PNG/JPG/PDF)
 - Scale calibration: user enters known distance, clicks two points on canvas, system computes px/m ratio
-- Barrier digitisation: **multiple independent polylines** supported on a single canvas — barriers do not need to form one continuous alignment
-  - Controls: Start Drawing / Stop Drawing / Undo Last Point / Delete Selected / Clear All
-  - Each completed polyline (stopped) becomes a named alignment (Alignment 1, Alignment 2, etc.)
-  - User can start a new polyline at any time after stopping the current one
-- Segment table auto-generated from all drawn polylines using calibrated scale
-  - Columns: Alignment (1, 2, 3...), Segment ID (A, B, C... resets per alignment), Length (m), Tag (dropdown: Type 1 / Type 2 / Type 3)
-- "Confirm Alignment" button — saves to ProjectContext, marks step complete
+
+**Canvas — barrier digitisation:**
+- Multiple independent polylines supported — barriers do not need to form one continuous alignment
+- Controls: Start Drawing / Stop Drawing / Undo Last Point / Delete Selected / Clear All
+- Each completed polyline becomes a named alignment (Alignment 1, Alignment 2, etc.)
+- User can start a new polyline at any time after stopping the current one
+- **Canvas highlighting:** when the user selects an alignment from the alignment tab panel, the corresponding polyline on the canvas highlights (distinct colour or weight). Clicking a polyline on the canvas selects the corresponding tab. Selection is bidirectional.
+
+**Alignment tab panel (right side or below canvas):**
+- One tab per alignment (Alignment 1, Alignment 2, etc.)
+- Each tab shows the segment table for that alignment only
+  - Columns: Segment ID (A, B, C...), Length (m), Tag (dropdown: Type 1 / Type 2 / Type 3)
+- Adding a new alignment automatically adds a new tab
+- Active tab corresponds to the highlighted polyline on canvas
+
+**Segment table is per-alignment (not a single combined table)** — confirmed from client feedback that a single combined table across all alignments is confusing.
+
+- "Confirm Alignment" button — saves all polylines and all segment tables to ProjectContext, marks step complete
 
 **Steps 3–6 — Scaffolds only**
 - Each step renders its title, subtitle, and a clear placeholder message
 - "Continue" button advances to next step for demo navigation
 - Step 6 shows a summary card of all ProjectContext values collected so far
-- Step 3 scaffold must include the code selection panel as the first tab — render the checklist UI with pre-selected defaults (see Section 2.3) even though no calculation logic runs yet. This confirms the UI placement before the calculation engine is built.
+- Step 3 opens directly on the Design Parameters tab — no code selection tab
+  (codes are fixed constants, not user-selectable — see Section 2.3)
 
 ### What NOT to Build in the First Iteration
 - No calculation logic of any kind
@@ -1080,6 +1134,7 @@ All Claude API calls in the prototype go **frontend → FastAPI backend → Clau
 interface Polyline {
   id: number                          // Alignment number (1, 2, 3...)
   points: { x: number; y: number }[]  // Canvas coordinates
+  is_active: boolean                  // Whether this alignment is selected/highlighted on canvas
 }
 
 interface SegmentRow {
@@ -1090,6 +1145,14 @@ interface SegmentRow {
 }
 
 interface ProjectContext {
+  // Project metadata
+  meta: {
+    id: string
+    created_by: string                // Free-text name — no auth required
+    last_modified_by: string          // Free-text name — no auth required
+    created_at: string                // ISO timestamp
+    updated_at: string                // ISO timestamp
+  }
   // Step 1
   project_info: {
     project_name: string
@@ -1105,13 +1168,16 @@ interface ProjectContext {
     site_plan_image: File | null
     calibration: { known_distance: number; px_per_m: number } | null
     polylines: Polyline[]             // Multiple independent alignments
-    segment_table: SegmentRow[]       // Flattened rows across all alignments
+    active_alignment_id: number | null // Which tab/polyline is currently selected
+    segment_table: SegmentRow[]       // All segments across all alignments
     step2_confirmed: boolean
   }
 }
 ```
 
-> **Upgrade note:** The `polylines` array maps directly to database rows when PostgreSQL persistence is added. No store restructuring required — the shape is already normalised.
+> **Note on applicable_codes:** The `applicable_codes` Zustand slice previously specced is removed. Codes are fixed backend constants — see Section 2.3. If this slice was already built, remove it from the store and replace any references with the static constants defined in `backend/app/calculation/constants.py`.
+
+> **Upgrade note:** The `meta` fields map directly to database columns when PostgreSQL persistence is added. The `polylines` array maps to a polylines table. No store restructuring required.
 
 ### Code Standards
 - Every placeholder or unimplemented calculation must be marked: `// PROVISIONAL: pending SME validation — see PRD Section X.X`
