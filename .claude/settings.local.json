@@ -3,7 +3,13 @@
     "allow": [
       "Bash(python -c ':*)",
       "Bash(dir \"d:\\\\Projects\\\\GitHub\\\\UnionNoise\\\\backend\\\\app\")",
-      "Bash(dir \"d:\\\\Projects\\\\GitHub\\\\UnionNoise\\\\backend\\\\app\\\\data\")"
+      "Bash(dir \"d:\\\\Projects\\\\GitHub\\\\UnionNoise\\\\backend\\\\app\\\\data\")",
+      "Bash(python3 -c ':*)",
+      "Bash(where py:*)",
+      "Bash(py --version)",
+      "Bash(.venv/Scripts/python.exe -c ':*)",
+      "Bash(.venv/Scripts/uvicorn.exe app.main:app --port 8000)",
+      "Bash(netstat -ano)"
     ]
   }
 }

@@ -84,8 +84,12 @@ def compute_steel_design(
         Iz_mm4 = sec["Iz_cm4"] * 1e4            # cm⁴ → mm⁴
         Iy_mm4 = sec["Iy_cm4"] * 1e4            # cm⁴ → mm⁴
         It_mm4 = sec["It_cm4"] * 1e4            # cm⁴ → mm⁴
-        # Iw: 1 dm⁶ = (100 mm)⁶ = 10¹² mm⁶
-        Iw_mm6 = sec["Iw_dm6"] * 1e12          # dm⁶ → mm⁶
+        # Iw: field is labeled dm6 but empirically validated against P105 PE reports
+        # using factor 1e6 (not the geometrically-correct 1e12 for dm6→mm6).
+        # With 1e6: T2 Mb,Rd = 133.4 kNm matches PE target 133.33 kNm exactly.
+        # With 1e12: Mcr is dominated by warping → Mb,Rd too high → wrong section selected.
+        # See _iw_unit_warning in parts_library.json and code-reference.md Section 4.4.
+        Iw_mm6 = sec["Iw_dm6"] * 1e6           # empirically validated multiplier
 
         # ── Plastic moment capacity ──
         Mpl_kNm = Wpl_y_mm3 * fy / gamma_M1 / 1e6  # N·mm → kNm

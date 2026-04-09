@@ -1,5 +1,22 @@
 # CHANGELOG
 
+## [0.7.0] — 2026-04-09
+
+### Added
+- Step 3 Design Parameters form — 11 inputs across three groups (Wind, Post, Foundation); structure height sourced read-only from `project_info.barrier_height`; shelter toggle shows x/φ fields and warns ψs=0.5 stub is used
+- Step 3 Results panel — Wind (ze, qp, design pressure, ψs), Steel (designation, M_Ed/Mb,Rd, UR_moment/deflection with pass/fail), Foundation (SLS/DA1-C1/DA1-C2 table: sliding FOS, overturning FOS, bearing UR), overall pass/fail banner
+- `Run Calculations` button in Step 3 — POSTs form inputs to `/api/calculate`, stores response in Zustand, shows inline error on failure; button disabled until all required fields are filled
+- `calculation_results: CalculationResults | null` slice in Zustand store (`projectStore.ts`) with `setCalculationResults` action; persists across navigation within session; cleared on `reset()`
+- `CalculationResults`, `WindCalcResult`, `SteelCalcResult`, `FoundationComboResult` interfaces in `types/index.ts`
+- Updated `DesignParameters` interface and store defaults: added shelter_present/shelter_x/shelter_phi, post_length, footing_L_m/footing_B_m/footing_D_m, vertical_load_G_kN; soil defaults updated to P105 confirmed values (γs=19 kN/m³, c'k=5 kN/m²)
+
+### Notes
+- Shelter factor UI collects x and φ but passes ψs=0.5 stub to backend — full Figure 7.20 lookup deferred until `shelter_factor_table.json` is digitised
+- Results panel is read-only display; iterate by editing form fields and re-running
+- footing_L_m (along barrier, perpendicular to wind) maps to API field `footing_W`; footing_B_m (in wind direction) maps to `footing_B`
+
+---
+
 ## [0.6.0] — 2026-04-09
 
 ### Added

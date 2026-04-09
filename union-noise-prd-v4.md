@@ -172,12 +172,22 @@ Project-specific inputs:
 
 EC1 Clause 4.3 computation chain:
 ```
+# Step 0 — Basic wind pressure (named intermediate — shown in PE report Section 5)
+qb = 0.5 × ρ × vb²                              [N/m²]   EN 1991-1-4 Eq 4.10
+# P105 validation: 0.5 × 1.194 × 20² = 238.80 N/m²
+# Note: qb is height-independent — same for all projects in SG
+
+# Step 1 — Peak velocity pressure (height-dependent)
 kr = 0.19 × (z0 / 0.05)^0.07 = 0.19        (constant for SG terrain category II)
 cr(z) = kr × ln(ze / z0)                     EC1 Clause 4.3.2
 vm(z) = cr(z) × Co(z) × vb                  EC1 Clause 4.3.1
 Iv(z) = kl / (Co(z) × ln(ze / z0))          EC1 Clause 4.4
-qp(ze) = [1 + 7×Iv(z)] × 0.5 × ρ × vm(z)²
+qp(ze) = [1 + 7×Iv(z)] × 0.5 × ρ × vm(z)²  [N/m²]
+# Note: qp > qb always — terrain roughness and turbulence amplify pressure with height
+# P105: qb=238.80 N/m², qp=598.48 N/m² (ratio 2.5× at z=12.7m)
 ```
+
+Both qb and qp must be returned as named outputs from wind.py and displayed in the Step 3 results panel and PE report Section 5.
 
 Reference outputs for validation (do not hardcode):
 | Scenario | ze | qp |

@@ -1,6 +1,51 @@
 {
-  "_note": "Digitised EN 1991-1-4 Figure 7.20 — shelter factor ψs for free-standing walls and fences. Lookup by (x/h, solidity φ). STUB — chart not yet digitised. Feed ψs=0.5 directly for P105 validation runs. See PRD Section 2.4 and code-reference.md Section 3.4.",
-  "_status": "STUB — Figure 7.20 must be manually digitised before shelter factor lookup can run for general projects",
-  "_structure": "For each φ curve: list of [x_over_h, psi_s] pairs, sorted by ascending x/h. Interpolate linearly.",
-  "curves": {}
+  "_note": "Digitised from EN 1991-1-4 Figure 7.20 — Shelter factor ψs for walls and fences.",
+  "_source": "EN 1991-1-4:2005 Figure 7.20, manually digitised April 2026",
+  "_usage": "Interpolate linearly between x/h points for a given phi. If x/h > 20 or ψs >= 1.0, shelter factor does not apply — use ψs = 1.0. If phi < 0.8, treat upwind structure as plane lattice — shelter factor method does not apply, use ψs = 1.0.",
+  "_interpolation": "Linear interpolation between adjacent x/h points within each phi curve.",
+  "_boundary_rules": {
+    "xh_max": 20,
+    "psi_s_max": 1.0,
+    "phi_min": 0.8,
+    "rule": "If x/h >= 20 OR computed ψs >= 1.0: shelter factor is obsolete, use ψs = 1.0. If phi < 0.8: method does not apply, use ψs = 1.0."
+  },
+  "_reading_notes": "Both curves are flat from x/h=0 to x/h≈5 (minimum shelter factor zone). Curves converge near x/h=12-15 and meet at ψs=1.0 at x/h=20.",
+  "curves": {
+    "1.0": {
+      "_description": "Solid line — fully solid upwind wall/structure (phi=1.0)",
+      "points": [
+        {"xh": 0,  "psi_s": 0.30},
+        {"xh": 2,  "psi_s": 0.30},
+        {"xh": 5,  "psi_s": 0.30},
+        {"xh": 7,  "psi_s": 0.38},
+        {"xh": 8,  "psi_s": 0.45},
+        {"xh": 9,  "psi_s": 0.52},
+        {"xh": 10, "psi_s": 0.60},
+        {"xh": 11, "psi_s": 0.65},
+        {"xh": 12, "psi_s": 0.70},
+        {"xh": 13, "psi_s": 0.76},
+        {"xh": 15, "psi_s": 0.85},
+        {"xh": 17, "psi_s": 0.92},
+        {"xh": 20, "psi_s": 1.00}
+      ]
+    },
+    "0.8": {
+      "_description": "Dashed line — upwind structure with solidity ratio phi=0.8",
+      "points": [
+        {"xh": 0,  "psi_s": 0.40},
+        {"xh": 2,  "psi_s": 0.40},
+        {"xh": 5,  "psi_s": 0.40},
+        {"xh": 7,  "psi_s": 0.46},
+        {"xh": 8,  "psi_s": 0.50},
+        {"xh": 9,  "psi_s": 0.55},
+        {"xh": 10, "psi_s": 0.60},
+        {"xh": 11, "psi_s": 0.66},
+        {"xh": 12, "psi_s": 0.72},
+        {"xh": 13, "psi_s": 0.78},
+        {"xh": 15, "psi_s": 0.85},
+        {"xh": 17, "psi_s": 0.93},
+        {"xh": 20, "psi_s": 1.00}
+      ]
+    }
+  }
 }

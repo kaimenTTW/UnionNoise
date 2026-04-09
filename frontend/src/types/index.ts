@@ -45,10 +45,16 @@ export interface DesignParameters {
   basic_wind_speed: number          // default 20
   /** Return period in years. User input — default 50yr. */
   return_period: number             // default 50
-  /** Structure height from ground (m). Drives qp calculation. */
+  /** Structure height from ground (m). Drives qp calculation. Sourced from project_info.barrier_height. */
   structure_height: number | null
   /** Shelter factor — user-confirmed per site. Default 1.0 (no shelter). */
   shelter_factor: number            // default 1.0
+  /** Is there a sheltering structure upwind? Drives ψs derivation. */
+  shelter_present: boolean          // default false
+  /** Spacing from barrier to upwind sheltering structure x [m]. Required when shelter_present=true. */
+  shelter_x: number | null
+  /** Solidity ratio φ of upwind structure (0.8/0.9/1.0). Required when shelter_present=true. */
+  shelter_phi: number | null
   /** Wind zone A/B/C/D per EC1 Table 7.9 — engineering judgement, user-confirmed. */
   wind_zone: WindZone | null
   /** Barrier length / barrier height ratio — used to look up cp from EC1 Table 7.9. */
@@ -59,6 +65,8 @@ export interface DesignParameters {
   post_spacing: number | null
   /** Subframe spacing (m). Drives Lcr for torsional buckling check. */
   subframe_spacing: number | null
+  /** Post length above foundation level (m). T1: 11m, T2: 12.7m. */
+  post_length: number | null
 
   // ── Materials ──
   /** Concrete grade — default C25/30 per PE reports. */
@@ -75,15 +83,87 @@ export interface DesignParameters {
   footing_type: FootingType | null
   /** Allowable soil bearing pressure (kPa). Default 75 kPa if no site investigation. */
   allowable_soil_bearing: number    // default 75
+  /** Footing dimension along barrier / perpendicular to wind (m). Maps to API footing_W. */
+  footing_L_m: number | null
+  /** Footing dimension in wind direction (m). Maps to API footing_B. */
+  footing_B_m: number | null
+  /** Embedment depth below ground (m). 0 for exposed pad. */
+  footing_D_m: number | null
+  /** Permanent vertical load: post self-weight + footing weight (kN). */
+  vertical_load_G_kN: number | null
 
   // ── Soil (provisional — user-configurable, not hardcoded) ──
   // PROVISIONAL: pending SME validation — see PRD Section 2.5
-  /** Soil friction angle φk (degrees). Default 30°. */
+  /** Soil friction angle φk (degrees). P105 confirmed: 30°. */
   phi_k: number                     // default 30
-  /** Soil unit weight γs (kN/m³). Default 20. */
-  gamma_s: number                   // default 20
-  /** Soil cohesion c'k (kN/m²). Default 0. */
-  cohesion_ck: number               // default 0
+  /** Soil unit weight γs (kN/m³). P105 confirmed: 19 kN/m³. */
+  gamma_s: number                   // default 19
+  /** Soil cohesion c'k (kN/m²). P105 confirmed: 5 kN/m². */
+  cohesion_ck: number               // default 5
+}
+
+// ─── Calculation results (returned from POST /api/calculate) ─────────────────
+
+export interface WindCalcResult {
+  ze_m: number
+  cr: number
+  vm_m_per_s: number
+  Iv: number
+  qp_N_per_m2: number
+  qp_kPa: number
+  cp_net: number
+  shelter_factor: number
+  design_pressure_kPa: number
+}
+
+export interface SteelCalcResult {
+  designation?: string
+  mass_kg_per_m?: number
+  M_Ed_kNm?: number
+  Mb_Rd_kNm?: number
+  UR_moment?: number
+  UR_deflection?: number
+  delta_mm?: number
+  delta_allow_mm?: number
+  V_Ed_kN?: number
+  Lcr_mm?: number
+  pass: boolean
+  error?: string
+}
+
+export interface FoundationComboResult {
+  label: string
+  H_factored_kN: number
+  M_factored_kNm: number
+  F_R_sliding_kN: number
+  FOS_sliding: number
+  pass_sliding: boolean
+  fos_limit_sliding: number
+  M_Rd_overturning_kNm: number
+  FOS_overturning: number
+  pass_overturning: boolean
+  fos_limit_overturning: number
+  bearing: {
+    UR_bearing?: number | null
+    qu_kPa?: number
+    q_max_kPa?: number
+    q_allow_kPa?: number
+    q_applied_kPa?: number
+  }
+  pass_bearing: boolean
+  pass: boolean
+}
+
+export interface CalculationResults {
+  wind: WindCalcResult
+  steel: SteelCalcResult
+  foundation: {
+    footing_type: string
+    SLS: FoundationComboResult
+    DA1_C1: FoundationComboResult
+    DA1_C2: FoundationComboResult
+    pass: boolean
+  }
 }
 
 // ─── ProjectContext slices ────────────────────────────────────────────────────
