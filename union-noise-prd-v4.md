@@ -55,6 +55,42 @@ An earlier demo that jumped directly from requirements to AutoCAD-style output w
 - For the prototype stub: `created_by` and `last_modified_by` are free-text fields entered by the user on project creation — no authentication system behind them
 - Upgrade path: when user accounts are introduced, these fields are populated automatically from the logged-in session
 
+### Engineering Judgement Override Principle
+
+Certain values in the system are computed from inputs or fixed by code (e.g. shelter factor from Figure 7.20 lookup, basic wind velocity from SG NA). Despite being calculated or standardised, engineers may need to override these based on site-specific judgement or conservative practice.
+
+**Rule:** Any calculated or code-fixed value that involves engineering judgement must support manual override. This applies system-wide. Current known override candidates:
+
+| Field | Default / Calculated value | Override scenario |
+|---|---|---|
+| Shelter factor ψs | Derived from x/h lookup (Figure 7.20) | PE may use a more conservative value based on site experience |
+| Basic wind velocity vb | 20 m/s (SG NA fixed) | Engineer may increase for additional conservatism |
+| cp,net | 1.2 (porous panel fixed) | Engineer may use a different zone value for specific conditions |
+| Return period | 50 years (default) | Shorter for temporary works |
+
+**UI behaviour for overridable fields:**
+- Field shows the calculated/default value pre-populated
+- Field is editable — user can type a different value
+- If the value differs from the calculated default, an **override badge** appears on the field (e.g. amber border + "Overridden" label)
+- A **reason field** appears when an override is active — free text, required before confirming
+- The original calculated value is shown as a tooltip or sub-label so the engineer can see what they are departing from
+
+**ProjectContext:** Every overridable field stores both the calculated value and the override:
+```typescript
+interface OverridableValue {
+  calculated: number       // system-computed or code-fixed value
+  override: number | null  // null if not overridden
+  override_reason: string  // required if override is set
+  effective: number        // = override ?? calculated (used in all downstream calculations)
+}
+```
+
+**PE report behaviour:** If any value was overridden, Section 6 (Design Information) of the PE report must note it explicitly:
+```
+Basic wind velocity: 25.0 m/s  [Override — SG NA default = 20.0 m/s. Reason: conservative estimate for exposed hilltop site]
+```
+This ensures the PE is aware of all departures from standard values before signing.
+
 ---
 
 ## 3. System Architecture — Three-Layer Model
@@ -226,7 +262,9 @@ This is the confirmed treatment for TNCB panels in all P105 reports. The zone-ba
   - System computes: ratio = x / h
   - System looks up ψs from `backend/app/data/shelter_factor_table.json`
     (digitised EN 1991-1-4 Figure 7.20, interpolated from x/h and φ)
-  - Displays derived ψs for user confirmation before proceeding
+  - ψs field is **pre-populated with the calculated value but remains editable**
+  - If the engineer changes the ψs value from the calculated result, the override pattern applies (see Section 2 — Engineering Judgement Override Principle): amber border, override badge, reason field required
+  - Both the calculated value and the effective (override) value are stored in ProjectContext
 
 **Restrictions (EN 1991-1-4 Section 7.4.2):**
 - φ ≤ 0.8: treat upwind structure as plane lattice — shelter factor method does not apply
@@ -317,6 +355,49 @@ An aggregation view combining results from all calculations:
 - Clear indication of which specific check(s) failed and why
 - Users can iterate on parameters and re-run until all checks pass
 - The gate produces the data needed for Section 4 of the Design Report (utilization ratios summary)
+
+#### 2.7.1 Derivation Panel
+
+Every calculation result group (wind, steel, foundation) must include a **collapsible derivation panel** showing the full step-by-step calculation with all intermediate values and their formula references. This provides assurance to the engineer and the PE that the system is computing correctly.
+
+**Purpose:** Engineers need to see how results were derived, not just what they are. This mirrors the PE report format where every intermediate value is shown explicitly.
+
+**UI pattern:** Collapsible section below each result group. Collapsed by default, expandable on click. Label: "Show derivation" / "Hide derivation".
+
+**Content per group:**
+
+Wind derivation example:
+```
+Basic wind velocity       vb = 20.0 m/s              (SG NA 2.4)
+Directional factor        cdir = 1.0                  (confirmed)
+Season factor             cseason = 1.0               (confirmed)
+Basic wind pressure       qb = ½ρvb² = 238.80 N/m²   (EC1 Eq 4.10)
+Roughness factor          cr = 0.19 × ln(12.7/0.05)  = 1.052   (EC1 Cl 4.3.2)
+Mean velocity             vm = 1.052 × 1.0 × 20.0    = 21.04 m/s (EC1 Cl 4.3.1)
+Turbulence intensity      Iv = 1.0 / ln(12.7/0.05)   = 0.181   (EC1 Cl 4.4)
+Peak velocity pressure    qp = [1+7×0.181]×½×1.194×21.04² = 598.5 N/m²
+Pressure coefficient      cp,net = 1.2               (Table 7.9, porous panel)
+Shelter factor            ψs = 0.5                   (Fig 7.20, x/h=8.71, φ=1.0)
+Design pressure           q = 598.5 × 1.2 × 0.5     = 359.1 N/m² ≈ 0.36 kPa
+```
+
+Steel derivation example:
+```
+Design UDL                w = 0.36 × 3.0             = 1.08 kN/m
+Post moment ULS           M_Ed = 1.5×1.08×12.7²/2   = 130.31 kNm  (EC3)
+Post shear ULS            V_Ed = 1.5×1.08×12.7       = 20.52 kN
+Selected section          UB406×140×39               (lightest passing section)
+Plastic moment capacity   Mpl = 724×10³×275/1×10⁶   = 199.1 kNm
+Elastic critical moment   Mcr = ...                  = 180.92 kNm  (EC3 Cl 6.3.2)
+LTB slenderness           λ̄LT = √(199.1/180.92)     = 1.049
+Reduction factor          χLT = 0.67                 (EC3 Cl 6.3.2.3)
+Buckling resistance       Mb,Rd = 0.67×199.1         = 133.4 kNm
+Utilization ratio         UR = 130.31/133.4          = 0.977 < 1.0 ✓
+```
+
+**Implementation note:** No backend changes required. The calculation engine already returns all intermediate values in the API response dict. The derivation panel is a pure frontend component (`DerivationPanel`) that formats the existing response data into readable steps. Each step shows: label, formula expression, substituted values, result, and clause reference where applicable.
+
+**Overridden values** in the derivation panel must be visually marked (amber colour or override badge) so the engineer can immediately see which inputs departed from calculated defaults.
 
 **Checks confirmed from PE report (all must pass):**
 - Moment (torsional buckling) — ULS
@@ -1141,15 +1222,24 @@ All Claude API calls in the prototype go **frontend → FastAPI backend → Clau
 ### ProjectContext (Zustand Store Shape)
 
 ```typescript
+// Overridable field — stores both calculated default and any engineer override
+// See Section 2 — Engineering Judgement Override Principle
+interface OverridableValue {
+  calculated: number        // system-computed or code-fixed value
+  override: number | null   // null if not overridden
+  override_reason: string   // required if override is set, empty string otherwise
+  effective: number         // = override ?? calculated — used in all downstream calculations
+}
+
 interface Polyline {
-  id: number                          // Alignment number (1, 2, 3...)
-  points: { x: number; y: number }[]  // Canvas coordinates
-  is_active: boolean                  // Whether this alignment is selected/highlighted on canvas
+  id: number
+  points: { x: number; y: number }[]
+  is_active: boolean
 }
 
 interface SegmentRow {
-  alignment_id: number                // Which polyline this segment belongs to
-  segment_id: string                  // A, B, C... (resets per alignment)
+  alignment_id: number
+  segment_id: string
   length_m: number
   tag: string
 }
@@ -1158,10 +1248,10 @@ interface ProjectContext {
   // Project metadata
   meta: {
     id: string
-    created_by: string                // Free-text name — no auth required
-    last_modified_by: string          // Free-text name — no auth required
-    created_at: string                // ISO timestamp
-    updated_at: string                // ISO timestamp
+    created_by: string
+    last_modified_by: string
+    created_at: string
+    updated_at: string
   }
   // Step 1
   project_info: {
@@ -1177,15 +1267,43 @@ interface ProjectContext {
   site_data: {
     site_plan_image: File | null
     calibration: { known_distance: number; px_per_m: number } | null
-    polylines: Polyline[]             // Multiple independent alignments
-    active_alignment_id: number | null // Which tab/polyline is currently selected
-    segment_table: SegmentRow[]       // All segments across all alignments
+    polylines: Polyline[]
+    active_alignment_id: number | null
+    segment_table: SegmentRow[]
     step2_confirmed: boolean
+  }
+  // Step 3 — design parameters (overridable fields use OverridableValue)
+  design_parameters: {
+    vb: OverridableValue              // Basic wind velocity — calculated=20.0, overridable
+    return_period: number             // years — user selects, default 50
+    shelter_present: boolean
+    shelter_x_m: number | null
+    shelter_phi: number | null
+    shelter_factor: OverridableValue  // ψs — calculated from Figure 7.20, overridable
+    post_spacing_m: number
+    subframe_spacing_m: number
+    post_length_m: number
+    footing_type: string
+    footing_B_m: number
+    footing_L_m: number
+    footing_D_m: number
+    phi_k_deg: number
+    gamma_s: number
+    c_prime: number
+  }
+  // Step 3 — calculation results
+  calculation_results: {
+    wind: object | null
+    steel: object | null
+    foundation: object | null
+    all_checks_pass: boolean
   }
 }
 ```
 
-> **Note on applicable_codes:** The `applicable_codes` Zustand slice previously specced is removed. Codes are fixed backend constants — see Section 2.3. If this slice was already built, remove it from the store and replace any references with the static constants defined in `backend/app/calculation/constants.py`.
+> **Note on applicable_codes:** Removed — codes are fixed backend constants, see Section 2.3.
+
+> **Upgrade note:** `polylines` and `design_parameters` map directly to database columns when PostgreSQL is added.
 
 > **Upgrade note:** The `meta` fields map directly to database columns when PostgreSQL persistence is added. The `polylines` array maps to a polylines table. No store restructuring required.
 
