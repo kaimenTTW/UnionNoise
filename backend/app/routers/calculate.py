@@ -63,6 +63,11 @@ class WindResult(BaseModel):
     Iv: float
     qp_N_per_m2: float
     qp_kPa: float
+    vb_m_per_s: float
+    cdir: float
+    cseason: float
+    qb_N_per_m2: float
+    qb_kPa: float
     cp_net: float
     shelter_factor: float
     design_pressure_kPa: float
@@ -84,6 +89,9 @@ class SteelResult(BaseModel):
     delta_mm: float | None = None
     delta_allow_mm: float | None = None
     UR_deflection: float | None = None
+    Av_mm2: float | None = None
+    Vc_kN: float | None = None
+    UR_shear: float | None = None
     Lcr_mm: float | None = None
     post_length_m: float | None = None
     pass_: bool = Field(False, alias="pass")
@@ -178,7 +186,7 @@ def calculate(body: CalculateRequest) -> CalculateResponse:
             c_k_kPa=body.cohesion_ck,
             allowable_soil_bearing_kPa=body.allowable_soil_bearing,
             footing_B_m=body.footing_B,
-            footing_W_m=body.footing_W,
+            footing_L_m=body.footing_W,
             footing_D_m=body.footing_D,
         )
     except Exception as exc:

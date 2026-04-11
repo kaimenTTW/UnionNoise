@@ -1,3 +1,14 @@
+// ─── Overridable engineering value ───────────────────────────────────────────
+// Any calculated or code-fixed value that requires engineering judgement override.
+// See PRD Section 2 — Engineering Judgement Override Principle.
+
+export interface OverridableValue {
+  calculated: number        // system-computed or code-fixed value
+  override: number | null   // null if not overridden
+  override_reason: string   // required if override is set, empty string otherwise
+  effective: number         // = override ?? calculated — used in all downstream calculations
+}
+
 // ─── Domain types ────────────────────────────────────────────────────────────
 
 export type BarrierType = 'Type 1' | 'Type 2' | 'Type 3'
@@ -41,14 +52,14 @@ export type BoltGrade = '8.8' | '10.9'
 
 export interface DesignParameters {
   // ── Wind ──
-  /** Basic wind velocity (m/s). Fixed SG NA constant: 20 m/s. */
-  basic_wind_speed: number          // default 20
+  /** Basic wind velocity (m/s). SG NA fixed at 20 m/s; overridable for site-specific conservatism. */
+  vb: OverridableValue              // calculated=20.0
   /** Return period in years. User input — default 50yr. */
   return_period: number             // default 50
   /** Structure height from ground (m). Drives qp calculation. Sourced from project_info.barrier_height. */
   structure_height: number | null
-  /** Shelter factor — user-confirmed per site. Default 1.0 (no shelter). */
-  shelter_factor: number            // default 1.0
+  /** Shelter factor ψs — calculated from Figure 7.20 lookup; overridable by engineer judgement. */
+  shelter_factor: OverridableValue  // calculated=1.0 (no shelter), or 0.5 stub (shelter present)
   /** Is there a sheltering structure upwind? Drives ψs derivation. */
   shelter_present: boolean          // default false
   /** Spacing from barrier to upwind sheltering structure x [m]. Required when shelter_present=true. */
@@ -111,6 +122,12 @@ export interface WindCalcResult {
   Iv: number
   qp_N_per_m2: number
   qp_kPa: number
+  // Added v0.8.0 — present in responses from backend v0.8.0+
+  vb_m_per_s?: number
+  cdir?: number
+  cseason?: number
+  qb_N_per_m2?: number
+  qb_kPa?: number
   cp_net: number
   shelter_factor: number
   design_pressure_kPa: number
@@ -119,20 +136,31 @@ export interface WindCalcResult {
 export interface SteelCalcResult {
   designation?: string
   mass_kg_per_m?: number
+  w_kN_per_m?: number
   M_Ed_kNm?: number
+  V_Ed_kN?: number
+  Mpl_kNm?: number
+  Mcr_kNm?: number
+  lambda_bar_LT?: number
+  phi_LT?: number
+  chi_LT?: number
   Mb_Rd_kNm?: number
   UR_moment?: number
-  UR_deflection?: number
   delta_mm?: number
   delta_allow_mm?: number
-  V_Ed_kN?: number
+  UR_deflection?: number
+  Av_mm2?: number
+  Vc_kN?: number
+  UR_shear?: number
   Lcr_mm?: number
+  post_length_m?: number
   pass: boolean
   error?: string
 }
 
 export interface FoundationComboResult {
   label: string
+  phi_d_deg?: number          // design friction angle (added v0.8.0)
   H_factored_kN: number
   M_factored_kNm: number
   F_R_sliding_kN: number
@@ -145,10 +173,22 @@ export interface FoundationComboResult {
   fos_limit_overturning: number
   bearing: {
     UR_bearing?: number | null
-    qu_kPa?: number
+    // Exposed pad fields
+    e_m?: number
+    b_prime_m?: number        // effective width after eccentricity (added v0.8.0)
     q_max_kPa?: number
     q_allow_kPa?: number
+    // Embedded RC fields
+    B_prime_m?: number        // effective width from EC7 Annex D (capital B convention)
+    qu_kPa?: number
     q_applied_kPa?: number
+    phi_d_deg?: number
+    Nq?: number
+    Nc?: number
+    Ny?: number
+    sq?: number
+    sc?: number
+    sy?: number
   }
   pass_bearing: boolean
   pass: boolean

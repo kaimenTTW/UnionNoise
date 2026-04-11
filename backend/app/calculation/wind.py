@@ -75,12 +75,27 @@ def compute_design_pressure(structure_height: float, shelter_factor: float) -> d
         shelter_factor:   ψs — feed 0.5 for P105 validation; 1.0 for no shelter.
     """
     cp_net = SG_NA["cp_net"]
+    rho = SG_NA["rho"]
+    vb = SG_NA["vb0"]
+    cdir = SG_NA["cdir"]
+    cseason = SG_NA["cseason"]
+
     qp_result = compute_qp(structure_height)
     qp_kPa = qp_result["qp_kPa"]
     design_pressure_kPa = qp_kPa * cp_net * shelter_factor
 
+    # Basic wind pressure (height-independent reference)
+    # qb = 0.5 × ρ × vb²   P105 validation: qb = 238.80 N/m²
+    qb_N_per_m2 = 0.5 * rho * vb ** 2
+    qb_kPa = qb_N_per_m2 / 1000
+
     return {
         **qp_result,
+        "vb_m_per_s": vb,
+        "cdir": cdir,
+        "cseason": cseason,
+        "qb_N_per_m2": round(qb_N_per_m2, 2),
+        "qb_kPa": round(qb_kPa, 4),
         "cp_net": cp_net,
         "shelter_factor": shelter_factor,
         "design_pressure_kPa": round(design_pressure_kPa, 4),

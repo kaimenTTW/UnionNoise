@@ -1,8 +1,9 @@
 """
-Steel post design — EC3 Clause 6.3.2 (Lateral Torsional Buckling) + deflection.
+Steel post design — EC3 Clause 6.3.2 (LTB) + deflection + shear capacity.
 
 All formulas ✅ CONFIRMED across PE calculation reports.
 Reference: code-reference.md Sections 4.2–4.5. Primary source: P105 Punggol.
+Shear: EC3 Clause 6.2.6. A_cm2 derived from mass_kg_per_m (no A field in library).
 
 Selection algorithm: iterate parts library ascending by Wpl_y; return first section
 where both UR_moment < 1.0 AND UR_deflection < 1.0.
@@ -124,7 +125,20 @@ def compute_steel_design(
         delta_allow_mm = L_mm / 65
         UR_deflection = delta_mm / delta_allow_mm
 
-        if UR_moment < 1.0 and UR_deflection < 1.0:
+        # ── Shear capacity check (EC3 Clause 6.2.6) ──
+        # A_cm2 not stored in parts library — derived from mass: A[cm²] = mass[kg/m] / 0.785
+        # (steel density 7850 kg/m³ → 1 cm² × 1 m × 7850 kg/m³ × 1e-4 m²/cm² = 0.785 kg/m)
+        A_mm2 = sec["mass_kg_per_m"] / 0.785 * 100  # → mm²
+        h_mm = sec["h_mm"]
+        b_mm = sec["b_mm"]
+        tf_mm = sec["tf_mm"]
+        tw_mm = sec["tw_mm"]
+        r_mm = sec["r_mm"]
+        Av_mm2 = A_mm2 - 2 * b_mm * tf_mm + (tw_mm + 2 * r_mm) * tf_mm
+        Vc_kN = Av_mm2 * (fy / math.sqrt(3)) / STEEL["gamma_M0"] / 1000
+        UR_shear = V_Ed_kN / Vc_kN
+
+        if UR_moment < 1.0 and UR_deflection < 1.0 and UR_shear < 1.0:
             return {
                 "designation": sec["designation"],
                 "mass_kg_per_m": sec["mass_kg_per_m"],
@@ -141,6 +155,9 @@ def compute_steel_design(
                 "delta_mm": round(delta_mm, 2),
                 "delta_allow_mm": round(delta_allow_mm, 2),
                 "UR_deflection": round(UR_deflection, 3),
+                "Av_mm2": round(Av_mm2, 2),
+                "Vc_kN": round(Vc_kN, 2),
+                "UR_shear": round(UR_shear, 4),
                 "Lcr_mm": Lcr_mm,
                 "post_length_m": post_length_m,
                 "pass": True,

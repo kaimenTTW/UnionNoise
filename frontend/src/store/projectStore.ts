@@ -1,5 +1,5 @@
 import { create } from 'zustand'
-import type { BarrierType, CalibrationData, CalculationResults, DesignParameters, Polyline, ProjectInfo, ProjectMeta, SegmentRow, SiteData } from '../types'
+import type { BarrierType, CalibrationData, CalculationResults, DesignParameters, OverridableValue, Polyline, ProjectInfo, ProjectMeta, SegmentRow, SiteData } from '../types'
 
 interface ProjectStore {
   project_info: ProjectInfo
@@ -43,11 +43,17 @@ const defaultProjectInfo: ProjectInfo = {
 
 // PROVISIONAL: defaults pending SME validation — see PRD Section 2.4 / 2.5
 // Soil defaults updated to P105 confirmed values (φk=30°, γs=19 kN/m³, c'k=5 kN/m²)
+
+/** Helper to construct a default (non-overridden) OverridableValue. */
+function defaultOverridable(calculated: number): OverridableValue {
+  return { calculated, override: null, override_reason: '', effective: calculated }
+}
+
 const defaultDesignParameters: DesignParameters = {
-  basic_wind_speed: 20,
+  vb: defaultOverridable(20.0),       // SG NA fixed: 20 m/s; overridable per PRD §2
   return_period: 50,
   structure_height: null,
-  shelter_factor: 1.0,
+  shelter_factor: defaultOverridable(1.0),  // 1.0 = no shelter; recalculated when shelter_present changes
   shelter_present: false,
   shelter_x: null,
   shelter_phi: null,

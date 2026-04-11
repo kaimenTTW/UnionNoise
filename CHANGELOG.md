@@ -1,5 +1,65 @@
 # CHANGELOG
 
+## [0.9.1] — 2026-04-11
+
+### Fixed
+- Shelter factor ψs now interpolated from EN 1991-1-4 Figure 7.20 in real time — the `0.5` stub was replaced with live table lookup using `shelter_factor_table.json` data (already digitised). Result updates whenever x, φ, or structure height changes without needing to re-run calculations.
+- Solidity ratio φ dropdown now only offers `0.8` (porous) and `1.0` (solid) — removed `0.9` which has no curve in Figure 7.20. Per table notes: φ < 0.8 not covered; use ψs = 1.0.
+- `handleRunCalculations` now reads the live computed ψs directly instead of the potentially-stale store field, eliminating a subtle sync-lag bug when x/φ were changed immediately before pressing Run.
+
+### Changed
+- Shelter_present toggle now shows "Enter x and φ to calculate ψs" hint when inputs are incomplete (instead of the old "ψs = 0.5 stub" warning, which implied a permanent limitation rather than an incomplete-input state)
+- OverridableField for ψs shows `x/h = {value}, φ = {value}` as the hint once both inputs are filled, so the engineer can cross-check the lookup ratio
+
+---
+
+## [0.9.0] — 2026-04-11
+
+### Added
+- `OverridableValue` interface (`types/index.ts`) — stores `calculated`, `override`, `override_reason`, and `effective` (= override ?? calculated) per PRD §2 Engineering Judgement Override Principle
+- `OverridableField` component (Step3.tsx) — number input pre-populated with `calculated`; amber border + "Overridden" badge when value differs from default; free-text reason field appears on override (required for PE report note)
+- **vb override**: basic wind velocity field added to the Wind group in Step 3 form, pre-populated at 20.0 m/s (SG NA fixed). Override stored in `dp.vb`; wired to backend pending `vb` parameter addition to `/api/calculate`
+- **shelter_factor override**: ψs now stored as `OverridableValue`. `calculated` is reset to 0.5/1.0 when shelter_present toggles; user can override for site-specific conservatism. `dp.shelter_factor.effective` sent to backend (replaces old hardcoded local variable)
+- `DerivationPanel` component (Step3.tsx) — collapsible section below each result group; collapsed by default; "Show derivation / Hide derivation" toggle; formats API response into labelled rows: `label | formula | result | clause`
+- Wind derivation: vb → cdir → cseason → qb → cr → vm → Iv → qp → cp,net → ψs → design pressure. Overridden inputs shown in amber with `[Override]` marker
+- Steel derivation: w → M_Ed/V_Ed → selected section → Mpl → Mcr → λ̄LT → χLT → Mb,Rd → UR_moment → δ/δallow → UR_deflection → Vc,Rd → UR_shear
+- Foundation derivation (DA1-C1): factored H/M → sliding resistance → sliding FOS → overturning M_Rd → overturning FOS → bearing capacity → bearing UR
+- `WindCalcResult` extended with `vb_m_per_s?`, `cdir?`, `cseason?`, `qb_N_per_m2?`, `qb_kPa?` (optional — present in responses from backend v0.8.0+)
+- `SteelCalcResult` extended with `w_kN_per_m?`, `Mpl_kNm?`, `Mcr_kNm?`, `lambda_bar_LT?`, `phi_LT?`, `chi_LT?`, `Av_mm2?`, `Vc_kN?`, `UR_shear?`, `post_length_m?`
+- `FoundationComboResult` extended with `phi_d_deg?` (top-level) and additional bearing sub-fields: `e_m?`, `b_prime_m?`, `B_prime_m?`, `Nq?`, `Nc?`, `Ny?`, `sq?`, `sc?`, `sy?`
+
+### Changed
+- `DesignParameters.basic_wind_speed: number` → `vb: OverridableValue` (calculated=20.0)
+- `DesignParameters.shelter_factor: number` → `shelter_factor: OverridableValue` (calculated=1.0 or 0.5 per shelter_present)
+- `projectStore.ts`: `defaultDesignParameters` updated accordingly; added `defaultOverridable()` helper
+- Shelter toggle in Step 3 now calls `handleShelterPresent()` which resets `shelter_factor.calculated` and clears any existing override
+
+### Notes
+- vb override is stored in Zustand but not yet sent to the backend (backend hardcodes 20 m/s from SG NA constants). A `TODO` comment marks the wire-up point. Backend change deferred.
+- Derivation rows are built from the existing API response — no backend changes required
+- Override reason is free-text with no validation gate — the PE report generation layer (Step 6, future) will surface it in Section 6 (Design Information)
+
+---
+
+## [0.8.0] — 2026-04-11
+
+### Fixed
+- `foundation.py`: overturning resisting moment now applies γG,stb = 0.9 to the stabilising permanent load per EC7 EQU — `M_Rd = P_G × γG,stb × (B/2)`. Previously γG,stb was missing (equivalent to 1.0), over-stating resistance. Confirmed against P105 practice.
+- `foundation.py`: renamed all internal `footing_W_m` / `W_m` parameters to `footing_L_m` / `L_m` throughout (`_bearing_capacity_drained`, `_run_combination`, `compute_foundation`) to match EC7 Annex D notation (L = dimension perpendicular to wind). API request field `footing_W` unchanged; mapping in `calculate.py` updated to `footing_L_m`.
+- `steel.py`: added EC3 Clause 6.2.6 shear capacity check — `Av = A − 2bt_f + (t_w + 2r)t_f`; `Vc,Rd = Av × (fy/√3) / γM0`. Section selection now requires UR_moment < 1.0 AND UR_deflection < 1.0 AND UR_shear < 1.0. Shear does not govern for P105 geometry (UR_shear ≈ 0.05).
+
+### Added
+- `wind.py`: `compute_design_pressure()` now returns `vb_m_per_s`, `cdir`, `cseason`, `qb_N_per_m2`, `qb_kPa` — basic wind pressure qb = ½ρvb² = 238.80 N/m² per SG NA. Required by the calculate router response model.
+- `foundation.py`: `_run_combination()` return dict now includes `phi_d_deg` (design friction angle) and `b_prime_m` (effective footing width after eccentricity reduction). Required by the foundation results panel in Step 3.
+- `calculate.py`: `WindResult`, `SteelResult` Pydantic response models updated with the new fields added to `wind.py` and `steel.py` above.
+
+### Notes
+- P105 wind validation confirmed: qb=238.80 N/m², qp=598.48 N/m², design_pressure=0.359 kPa (target 0.36 kPa) ✓
+- P105 steel section validation: with shear check added, T1 selects `305 × 127 × 37` (UR_shear=0.048) and T2 selects `356 × 127 × 39` (UR_shear=0.050). PE report cites `356 × 127 × 33` (T1) and `406 × 140 × 39` (T2). Discrepancy pre-dates this fix — caused by sort order: `305 × 127 × 37` has Wpl_y=539 cm³ < `356 × 127 × 33` Wpl_y=543 cm³ and passes all three checks, so it is selected first. Pending PE clarification on whether shear UR or a different criterion governs section choice in those reports.
+- Foundation numeric validation requires actual P105 footing geometry (B, L, D, G) from PE report — not available in this session; estimated values used for smoke-testing. γG,stb formula is structurally confirmed correct per P105.
+
+---
+
 ## [0.7.0] — 2026-04-09
 
 ### Added

@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useMemo, useEffect } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { useStepGuard } from '../hooks/useStepGuard'
 import { useProjectStore } from '../store/projectStore'
@@ -6,7 +6,47 @@ import type {
   CalculationResults,
   DesignParameters,
   FootingType,
+  OverridableValue,
 } from '../types'
+
+// ─── Shelter factor lookup — EN 1991-1-4 Figure 7.20 ─────────────────────────
+// Data from shelter_factor_table.json (backend/app/data).
+// Two curves only: phi=1.0 (solid) and phi=0.8.
+// P105 validation: xh=8.71, phi=1.0 → ψs≈0.50 ✓ (interpolates to 0.4997)
+// If phi < 0.8 or x/h ≥ 20: shelter factor does not apply → ψs = 1.0.
+
+const SHELTER_CURVES: Record<'1.0' | '0.8', { xh: number; psi_s: number }[]> = {
+  '1.0': [
+    { xh: 0,  psi_s: 0.30 }, { xh: 2,  psi_s: 0.30 }, { xh: 5,  psi_s: 0.30 },
+    { xh: 7,  psi_s: 0.38 }, { xh: 8,  psi_s: 0.45 }, { xh: 9,  psi_s: 0.52 },
+    { xh: 10, psi_s: 0.60 }, { xh: 11, psi_s: 0.65 }, { xh: 12, psi_s: 0.70 },
+    { xh: 13, psi_s: 0.76 }, { xh: 15, psi_s: 0.85 }, { xh: 17, psi_s: 0.92 },
+    { xh: 20, psi_s: 1.00 },
+  ],
+  '0.8': [
+    { xh: 0,  psi_s: 0.40 }, { xh: 2,  psi_s: 0.40 }, { xh: 5,  psi_s: 0.40 },
+    { xh: 7,  psi_s: 0.46 }, { xh: 8,  psi_s: 0.50 }, { xh: 9,  psi_s: 0.55 },
+    { xh: 10, psi_s: 0.60 }, { xh: 11, psi_s: 0.66 }, { xh: 12, psi_s: 0.72 },
+    { xh: 13, psi_s: 0.78 }, { xh: 15, psi_s: 0.85 }, { xh: 17, psi_s: 0.93 },
+    { xh: 20, psi_s: 1.00 },
+  ],
+}
+
+/** Linear interpolation of ψs from EN 1991-1-4 Figure 7.20. */
+function lookupShelterFactor(xh: number, phi: number): number {
+  if (xh >= 20 || phi < 0.8) return 1.0
+  const key: '1.0' | '0.8' = phi >= 1.0 ? '1.0' : '0.8'
+  const curve = SHELTER_CURVES[key]
+  if (xh <= curve[0].xh) return curve[0].psi_s
+  for (let i = 0; i < curve.length - 1; i++) {
+    const lo = curve[i], hi = curve[i + 1]
+    if (xh >= lo.xh && xh <= hi.xh) {
+      const t = (xh - lo.xh) / (hi.xh - lo.xh)
+      return parseFloat((lo.psi_s + t * (hi.psi_s - lo.psi_s)).toFixed(3))
+    }
+  }
+  return 1.0
+}
 
 // ─── Layout helpers ───────────────────────────────────────────────────────────
 
@@ -44,6 +84,383 @@ function Field({
   )
 }
 
+// ─── Overridable field ────────────────────────────────────────────────────────
+// Renders a number input pre-populated with the calculated default.
+// Amber border + badge when the user has typed a different value.
+// Revert link resets back to the calculated value.
+// Reason field appears when overridden (required for PE report).
+//
+// Uses local rawInput string state so the user can backspace freely without the
+// input snapping back mid-edit. Store is only updated when a valid number parses.
+// On blur with an empty/invalid field, snaps back to the current effective value.
+
+function OverridableField({
+  label,
+  hint,
+  step = 0.1,
+  span,
+  value,
+  onChange,
+}: {
+  label: string
+  hint?: string
+  step?: number
+  span?: boolean
+  value: OverridableValue
+  onChange: (v: OverridableValue) => void
+}) {
+  const isOverridden = value.override !== null
+  const displayValue = isOverridden ? value.override! : value.calculated
+
+  // Local string tracks what's actually in the box, allowing partial editing.
+  const [rawInput, setRawInput] = useState<string>(String(displayValue))
+
+  // When the calculated value changes externally (e.g. shelter factor recomputed)
+  // and no override is active, keep the box in sync.
+  useEffect(() => {
+    if (!isOverridden) setRawInput(String(value.calculated))
+  }, [value.calculated, isOverridden])
+
+  function handleChange(e: React.ChangeEvent<HTMLInputElement>) {
+    const raw = e.target.value
+    setRawInput(raw)
+    const n = parseFloat(raw)
+    if (isNaN(n)) return  // user is mid-edit (e.g. cleared or typing "0.") — don't commit yet
+    const newOverride = n === value.calculated ? null : n
+    onChange({
+      ...value,
+      override: newOverride,
+      override_reason: newOverride === null ? '' : value.override_reason,
+      effective: newOverride ?? value.calculated,
+    })
+  }
+
+  function handleBlur() {
+    // If the box is empty or invalid when focus leaves, snap back to the effective value
+    if (rawInput.trim() === '' || isNaN(parseFloat(rawInput))) {
+      setRawInput(String(displayValue))
+    }
+  }
+
+  function handleRevert() {
+    onChange({ ...value, override: null, override_reason: '', effective: value.calculated })
+    setRawInput(String(value.calculated))
+  }
+
+  return (
+    <div className={`space-y-1${span ? ' col-span-2' : ''}`}>
+      <div className="flex items-baseline gap-2">
+        <label className="field-label mb-0">{label}</label>
+        {isOverridden && (
+          <>
+            <span className="text-[10px] font-semibold text-warning px-1.5 py-px rounded bg-warning/10 border border-warning/30 leading-none">
+              Overridden
+            </span>
+            <button
+              type="button"
+              onClick={handleRevert}
+              className="text-[10px] text-muted hover:text-accent underline transition-colors"
+              title={`Reset to calculated value: ${value.calculated}`}
+            >
+              ↺ reset to {value.calculated}
+            </button>
+          </>
+        )}
+      </div>
+      <input
+        type="number"
+        step={step}
+        className={`field-input transition-colors ${isOverridden ? 'border-warning/60 focus:border-warning' : ''}`}
+        value={rawInput}
+        onChange={handleChange}
+        onBlur={handleBlur}
+      />
+      {isOverridden && (
+        <input
+          type="text"
+          placeholder="Override reason (required for PE report)"
+          className="field-input text-xs border-warning/40"
+          value={value.override_reason}
+          onChange={(e) => onChange({ ...value, override_reason: e.target.value })}
+        />
+      )}
+      {hint && (
+        <p className="text-xs text-muted/60">
+          {isOverridden ? `Default: ${value.calculated} — ${hint}` : hint}
+        </p>
+      )}
+    </div>
+  )
+}
+
+// ─── Derivation panel ─────────────────────────────────────────────────────────
+// Collapsible step-by-step calculation table. Collapsed by default.
+// Overridden values shown in amber.
+
+type DerivationRow = {
+  label: string
+  expr?: string
+  result: string
+  clause?: string
+  overridden?: boolean
+}
+
+function DerivationPanel({ rows }: { rows: DerivationRow[] }) {
+  const [open, setOpen] = useState(false)
+
+  if (rows.length === 0) return null
+
+  return (
+    <div className="mt-2 border-t border-border/30 pt-2">
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        className="flex items-center gap-1.5 text-xs text-muted hover:text-accent transition-colors"
+      >
+        <span
+          className="inline-block transition-transform duration-150 text-[8px]"
+          style={{ transform: open ? 'rotate(90deg)' : 'rotate(0deg)' }}
+        >
+          ▶
+        </span>
+        {open ? 'Hide derivation' : 'Show derivation'}
+      </button>
+      {open && (
+        <div className="mt-2 overflow-x-auto rounded border border-border/40 bg-surface/30 px-3 py-2">
+          <table className="w-full text-xs">
+            <tbody>
+              {rows.map((row, i) => (
+                <tr key={i} className="border-b border-border/20 last:border-0">
+                  <td
+                    className={`py-1.5 pr-4 font-sans w-44 whitespace-nowrap align-top ${
+                      row.overridden ? 'text-warning font-medium' : 'text-muted'
+                    }`}
+                  >
+                    {row.label}
+                  </td>
+                  <td className="py-1.5 pr-4 font-mono text-foreground/70 align-top">
+                    {row.expr}
+                  </td>
+                  <td
+                    className={`py-1.5 pr-4 font-mono font-semibold whitespace-nowrap align-top ${
+                      row.overridden ? 'text-warning' : 'text-foreground'
+                    }`}
+                  >
+                    {row.result}
+                    {row.overridden && (
+                      <span className="ml-1.5 text-warning text-[10px] font-sans font-normal">
+                        [Override]
+                      </span>
+                    )}
+                  </td>
+                  <td className="py-1.5 font-sans text-muted/50 whitespace-nowrap align-top">
+                    {row.clause}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ─── Derivation row builders ──────────────────────────────────────────────────
+
+function buildWindRows(
+  wind: CalculationResults['wind'],
+  vbOverridden: boolean,
+  shelterOverridden: boolean,
+): DerivationRow[] {
+  const vb = wind.vb_m_per_s ?? 20
+  const rows: DerivationRow[] = [
+    {
+      label: 'Basic wind velocity',
+      expr: `vb = ${vb.toFixed(1)} m/s`,
+      result: `${vb.toFixed(1)} m/s`,
+      clause: 'SG NA 2.4',
+      overridden: vbOverridden,
+    },
+  ]
+  if (wind.cdir != null) {
+    rows.push({ label: 'Directional factor', expr: `cdir = ${wind.cdir}`, result: String(wind.cdir), clause: 'confirmed' })
+  }
+  if (wind.cseason != null) {
+    rows.push({ label: 'Season factor', expr: `cseason = ${wind.cseason}`, result: String(wind.cseason), clause: 'confirmed' })
+  }
+  if (wind.qb_N_per_m2 != null) {
+    rows.push({
+      label: 'Basic wind pressure',
+      expr: `qb = ½ × 1.194 × ${vb.toFixed(1)}²`,
+      result: `${wind.qb_N_per_m2.toFixed(2)} N/m²`,
+      clause: 'EC1 Eq 4.10',
+    })
+  }
+  rows.push(
+    {
+      label: 'Roughness factor',
+      expr: `cr = 0.19 × ln(${wind.ze_m}/0.05)`,
+      result: String(wind.cr),
+      clause: 'EC1 Cl 4.3.2',
+    },
+    {
+      label: 'Mean velocity',
+      expr: `vm = ${wind.cr} × 1.0 × ${vb.toFixed(1)}`,
+      result: `${wind.vm_m_per_s.toFixed(2)} m/s`,
+      clause: 'EC1 Cl 4.3.1',
+    },
+    {
+      label: 'Turbulence intensity',
+      expr: `Iv = 1.0 / ln(${wind.ze_m}/0.05)`,
+      result: String(wind.Iv),
+      clause: 'EC1 Cl 4.4',
+    },
+    {
+      label: 'Peak velocity pressure',
+      expr: `qp = [1+7×${wind.Iv}] × ½ × 1.194 × ${wind.vm_m_per_s.toFixed(2)}²`,
+      result: `${wind.qp_N_per_m2.toFixed(1)} N/m²  (${wind.qp_kPa.toFixed(3)} kPa)`,
+      clause: 'EC1 Eq 4.8',
+    },
+    {
+      label: 'Pressure coefficient',
+      expr: `cp,net = ${wind.cp_net}`,
+      result: String(wind.cp_net),
+      clause: 'EC1 Table 7.9',
+    },
+    {
+      label: 'Shelter factor',
+      expr: `ψs = ${wind.shelter_factor}`,
+      result: String(wind.shelter_factor),
+      clause: 'EC1 Fig 7.20 (stub)',
+      overridden: shelterOverridden,
+    },
+    {
+      label: 'Design pressure',
+      expr: `q = ${wind.qp_N_per_m2.toFixed(1)} × ${wind.cp_net} × ${wind.shelter_factor}`,
+      result: `${(wind.design_pressure_kPa * 1000).toFixed(1)} N/m²  ≈ ${wind.design_pressure_kPa.toFixed(3)} kPa`,
+      clause: 'EC1 §6.2',
+    },
+  )
+  return rows
+}
+
+function buildSteelRows(steel: CalculationResults['steel']): DerivationRow[] {
+  if (!steel.pass || steel.error || !steel.designation) return []
+  const rows: DerivationRow[] = []
+
+  if (steel.w_kN_per_m != null) {
+    rows.push({ label: 'Design UDL', expr: `w = q_design × post_spacing`, result: `${steel.w_kN_per_m.toFixed(3)} kN/m` })
+  }
+  if (steel.M_Ed_kNm != null) {
+    rows.push({ label: 'Moment ULS', expr: `M_Ed = 1.5 × w × L² / 2`, result: `${steel.M_Ed_kNm.toFixed(2)} kNm`, clause: 'EC3' })
+  }
+  if (steel.V_Ed_kN != null) {
+    rows.push({ label: 'Shear ULS', expr: `V_Ed = 1.5 × w × L`, result: `${steel.V_Ed_kN.toFixed(2)} kN`, clause: 'EC3' })
+  }
+  rows.push({ label: 'Selected section', expr: 'lightest passing', result: `UB ${steel.designation}` })
+  if (steel.Mpl_kNm != null) {
+    rows.push({ label: 'Plastic moment cap.', expr: `Mpl = Wpl × fy / γM1`, result: `${steel.Mpl_kNm.toFixed(2)} kNm`, clause: 'EC3 Cl 6.2.5' })
+  }
+  if (steel.Mcr_kNm != null) {
+    rows.push({ label: 'Elastic critical moment', expr: `Mcr = C1 × π²EIz/Lcr² × √(Iw/Iz + Lcr²GIt/π²EIz)`, result: `${steel.Mcr_kNm.toFixed(2)} kNm`, clause: 'EC3 Ann. BB' })
+  }
+  if (steel.lambda_bar_LT != null) {
+    rows.push({ label: 'LTB slenderness', expr: `λ̄LT = √(Mpl / Mcr)`, result: steel.lambda_bar_LT.toFixed(4), clause: 'EC3 Cl 6.3.2.2' })
+  }
+  if (steel.chi_LT != null) {
+    rows.push({ label: 'LTB reduction factor', expr: `χLT = 1 / (φLT + √(φLT²−β×λ̄LT²))`, result: steel.chi_LT.toFixed(4), clause: 'EC3 Cl 6.3.2.3' })
+  }
+  if (steel.Mb_Rd_kNm != null) {
+    rows.push({ label: 'Buckling resistance', expr: `Mb,Rd = χLT × Wpl × fy / γM1`, result: `${steel.Mb_Rd_kNm.toFixed(2)} kNm`, clause: 'EC3 Cl 6.3.2.1' })
+  }
+  if (steel.UR_moment != null) {
+    rows.push({ label: 'Moment UR', expr: `M_Ed / Mb,Rd`, result: `${steel.UR_moment.toFixed(3)} ${steel.UR_moment < 1.0 ? '< 1.0 ✓' : '≥ 1.0 ✗'}` })
+  }
+  if (steel.delta_mm != null && steel.delta_allow_mm != null) {
+    rows.push({ label: 'Deflection (SLS)', expr: `δ = w × L⁴ / (8EI)`, result: `${steel.delta_mm.toFixed(1)} mm  (allow ${steel.delta_allow_mm.toFixed(1)} mm, L/65)`, clause: 'EC3 §7.2' })
+  }
+  if (steel.UR_deflection != null) {
+    rows.push({ label: 'Deflection UR', expr: `δ / δallow`, result: `${steel.UR_deflection.toFixed(3)} ${steel.UR_deflection < 1.0 ? '< 1.0 ✓' : '≥ 1.0 ✗'}` })
+  }
+  if (steel.Vc_kN != null) {
+    rows.push({ label: 'Shear capacity', expr: `Vc,Rd = Av × (fy/√3) / γM0`, result: `${steel.Vc_kN.toFixed(2)} kN`, clause: 'EC3 Cl 6.2.6' })
+  }
+  if (steel.UR_shear != null) {
+    rows.push({ label: 'Shear UR', expr: `V_Ed / Vc,Rd`, result: `${steel.UR_shear.toFixed(4)} ${steel.UR_shear < 1.0 ? '< 1.0 ✓' : '≥ 1.0 ✗'}`, clause: 'EC3 Cl 6.2.6' })
+  }
+  return rows
+}
+
+function buildFoundationRows(foundation: CalculationResults['foundation']): DerivationRow[] {
+  const c1 = foundation.DA1_C1
+  const rows: DerivationRow[] = [
+    {
+      label: 'Factored H (DA1-C1)',
+      expr: `H = H_SLS × γQ`,
+      result: `${c1.H_factored_kN.toFixed(2)} kN`,
+      clause: 'γQ = 1.5',
+    },
+    {
+      label: 'Factored M (DA1-C1)',
+      expr: `M = M_SLS × γQ`,
+      result: `${c1.M_factored_kNm.toFixed(2)} kNm`,
+      clause: 'γQ = 1.5',
+    },
+  ]
+
+  if (foundation.footing_type === 'Exposed pad') {
+    rows.push({ label: 'Sliding resistance', expr: `F_R = μ × P_G  (μ=0.3)`, result: `${c1.F_R_sliding_kN.toFixed(2)} kN`, clause: 'P105 confirmed' })
+  } else {
+    const phi = c1.phi_d_deg != null ? `tanφd=tan(${c1.phi_d_deg.toFixed(1)}°)` : 'tanφd'
+    rows.push({ label: 'Sliding resistance', expr: `F_R = P_G × ${phi}`, result: `${c1.F_R_sliding_kN.toFixed(2)} kN`, clause: 'EC7 Cl 6.5.3' })
+  }
+
+  rows.push(
+    {
+      label: 'Sliding FOS',
+      expr: `FOS = F_R / H`,
+      result: `${c1.FOS_sliding.toFixed(3)} ${c1.pass_sliding ? `≥ ${c1.fos_limit_sliding} ✓` : `< ${c1.fos_limit_sliding} ✗`}`,
+    },
+    {
+      label: 'Overturning M_Rd',
+      expr: `M_Rd = P_G × 0.9 × B/2`,
+      result: `${c1.M_Rd_overturning_kNm.toFixed(2)} kNm`,
+      clause: 'EC7 EQU: γG,stb=0.9',
+    },
+    {
+      label: 'Overturning FOS',
+      expr: `FOS = M_Rd / M`,
+      result: `${c1.FOS_overturning.toFixed(3)} ${c1.pass_overturning ? `≥ ${c1.fos_limit_overturning} ✓` : `< ${c1.fos_limit_overturning} ✗`}`,
+    },
+  )
+
+  const br = c1.bearing
+  if (foundation.footing_type === 'Exposed pad' && br.q_max_kPa != null && br.q_allow_kPa != null) {
+    if (br.e_m != null) {
+      rows.push({ label: 'Eccentricity', expr: `e = M / P_G`, result: `${br.e_m.toFixed(3)} m` })
+    }
+    rows.push(
+      { label: 'Max bearing pressure', expr: `q_max = P/A × (1 + 6e/B)`, result: `${br.q_max_kPa.toFixed(2)} kPa` },
+      { label: 'Allowable bearing', expr: `q_allow (user input)`, result: `${br.q_allow_kPa.toFixed(2)} kPa` },
+    )
+  } else if (foundation.footing_type === 'Embedded RC' && br.qu_kPa != null && br.q_applied_kPa != null) {
+    if (br.Nq != null) {
+      rows.push({ label: 'Bearing factors', expr: `Nq=${br.Nq?.toFixed(2)}  Nc=${br.Nc?.toFixed(2)}  Nγ=${br.Ny?.toFixed(2)}`, result: '', clause: 'EC7 Ann. D.4' })
+    }
+    rows.push(
+      { label: 'Bearing capacity qu', expr: `c'Nc·sc + q·Nq·sq + ½γB'Nγ·sγ`, result: `${br.qu_kPa.toFixed(2)} kPa`, clause: 'EC7 Ann. D.4' },
+      { label: 'Applied bearing', expr: `q = P_G / (B' × L)`, result: `${br.q_applied_kPa.toFixed(2)} kPa` },
+    )
+  }
+
+  if (br.UR_bearing != null) {
+    rows.push({ label: 'Bearing UR', expr: `q_applied / q_capacity`, result: `${br.UR_bearing.toFixed(3)} ${c1.pass_bearing ? '< 1.0 ✓' : '≥ 1.0 ✗'}` })
+  }
+
+  return rows
+}
+
 // ─── Results display helpers ──────────────────────────────────────────────────
 
 function PassBadge({ pass }: { pass: boolean }) {
@@ -72,7 +489,15 @@ function UrCell({ value, pass }: { value: number; pass: boolean }) {
 
 // ─── Results panels ───────────────────────────────────────────────────────────
 
-function WindPanel({ wind }: { wind: CalculationResults['wind'] }) {
+function WindPanel({
+  wind,
+  vbOverridden,
+  shelterOverridden,
+}: {
+  wind: CalculationResults['wind']
+  vbOverridden: boolean
+  shelterOverridden: boolean
+}) {
   return (
     <div className="panel space-y-3">
       <p className="text-xs font-semibold uppercase tracking-widest text-muted">Wind Results</p>
@@ -106,10 +531,21 @@ function WindPanel({ wind }: { wind: CalculationResults['wind'] }) {
           <p className="font-mono">{wind.cp_net}</p>
         </div>
         <div>
-          <p className="text-muted text-xs">ψs</p>
-          <p className="font-mono">{wind.shelter_factor}</p>
+          <p className={`text-xs ${shelterOverridden ? 'text-warning' : 'text-muted'}`}>
+            ψs{shelterOverridden && ' [Override]'}
+          </p>
+          <p className={`font-mono ${shelterOverridden ? 'text-warning' : ''}`}>{wind.shelter_factor}</p>
         </div>
+        {wind.vb_m_per_s != null && (
+          <div>
+            <p className={`text-xs ${vbOverridden ? 'text-warning' : 'text-muted'}`}>
+              vb{vbOverridden && ' [Override]'}
+            </p>
+            <p className={`font-mono ${vbOverridden ? 'text-warning' : ''}`}>{wind.vb_m_per_s.toFixed(1)} m/s</p>
+          </div>
+        )}
       </div>
+      <DerivationPanel rows={buildWindRows(wind, vbOverridden, shelterOverridden)} />
     </div>
   )
 }
@@ -166,7 +602,16 @@ function SteelPanel({ steel }: { steel: CalculationResults['steel'] }) {
           <p className="text-muted text-xs">δ allow (L/65)</p>
           <p className="font-mono">{steel.delta_allow_mm?.toFixed(1)} mm</p>
         </div>
+        {steel.UR_shear !== undefined && (
+          <div>
+            <p className="text-muted text-xs">Shear UR</p>
+            <p className="font-mono">
+              <UrCell value={steel.UR_shear} pass={steel.UR_shear < 1.0} />
+            </p>
+          </div>
+        )}
       </div>
+      <DerivationPanel rows={buildSteelRows(steel)} />
     </div>
   )
 }
@@ -228,6 +673,7 @@ function FoundationPanel({ foundation }: { foundation: CalculationResults['found
           </tbody>
         </table>
       </div>
+      <DerivationPanel rows={buildFoundationRows(foundation)} />
     </div>
   )
 }
@@ -283,12 +729,46 @@ export default function Step3() {
   }
 
   // Structure height: sourced from project_info.barrier_height (read-only display)
-  // Falls back to dp.structure_height if barrier_height not yet set
   const structureHeight = project_info.barrier_height ?? dp.structure_height
 
-  // Shelter factor: stub — ψs=0.5 when shelter present, 1.0 otherwise
-  // PROVISIONAL: full x/h lookup deferred until shelter_factor_table.json is digitised
-  const shelterFactor = dp.shelter_present ? 0.5 : 1.0
+  // Derive ψs from Figure 7.20 in real time.
+  // Returns null when shelter_present=false or required inputs are incomplete.
+  const computedShelterFactor = useMemo<number | null>(() => {
+    if (!dp.shelter_present) return null
+    if (dp.shelter_x == null || dp.shelter_phi == null || structureHeight == null || structureHeight <= 0) return null
+    return lookupShelterFactor(dp.shelter_x / structureHeight, dp.shelter_phi)
+  }, [dp.shelter_present, dp.shelter_x, dp.shelter_phi, structureHeight])
+
+  // Sync computed ψs back to store whenever it changes so the derivation panel
+  // and override badge logic read the correct `calculated` value.
+  // The guard prevents unnecessary dispatches that would cause re-render loops.
+  useEffect(() => {
+    // When all inputs are available: use the looked-up value.
+    // When shelter_present=false: reset to 1.0.
+    // When shelter_present but inputs incomplete: keep the current stub (no update).
+    if (!dp.shelter_present) return  // handleShelterPresent already sets 1.0 on toggle-off
+    if (computedShelterFactor === null) return  // incomplete inputs — leave stub in place
+    if (computedShelterFactor === dp.shelter_factor.calculated) return  // no change
+    setDesignParameters({
+      shelter_factor: {
+        ...dp.shelter_factor,
+        calculated: computedShelterFactor,
+        effective: dp.shelter_factor.override ?? computedShelterFactor,
+      },
+    })
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [computedShelterFactor])
+
+  // When shelter_present toggles, reset the shelter_factor field.
+  // On toggle-on: stub 0.5 until x/φ/h are all filled (useEffect above then takes over).
+  // On toggle-off: 1.0 (no shelter).
+  function handleShelterPresent(present: boolean) {
+    const calc = present ? 0.5 : 1.0
+    set({
+      shelter_present: present,
+      shelter_factor: { calculated: calc, override: null, override_reason: '', effective: calc },
+    })
+  }
 
   const canRun =
     structureHeight != null &&
@@ -308,7 +788,10 @@ export default function Step3() {
     try {
       const body = {
         structure_height: structureHeight,
-        shelter_factor: shelterFactor,
+        // Effective ψs — respects any engineer override.
+        // Uses computedShelterFactor directly (not the store) to avoid any sync lag.
+        shelter_factor: dp.shelter_factor.override ?? (computedShelterFactor ?? dp.shelter_factor.calculated),
+        // TODO: wire dp.vb.effective to backend when calculate endpoint accepts a vb parameter
         post_spacing: dp.post_spacing,
         subframe_spacing: dp.subframe_spacing,
         post_length: dp.post_length,
@@ -340,6 +823,9 @@ export default function Step3() {
     }
   }
 
+  const vbOverridden = dp.vb.override !== null
+  const shelterOverridden = dp.shelter_factor.override !== null
+
   return (
     <div className="flex h-full flex-col">
       {/* Header */}
@@ -367,6 +853,14 @@ export default function Step3() {
               />
             </Field>
 
+            <OverridableField
+              label="Basic wind velocity vb (m/s)"
+              hint="SG NA fixed: 20 m/s"
+              step={0.5}
+              value={dp.vb}
+              onChange={(v) => set({ vb: v })}
+            />
+
             <Field label="Return period (years)" provisional>
               <select
                 className="field-input"
@@ -385,7 +879,7 @@ export default function Step3() {
                   <button
                     key={opt}
                     type="button"
-                    onClick={() => set({ shelter_present: opt === 'Yes' })}
+                    onClick={() => handleShelterPresent(opt === 'Yes')}
                     className={`px-4 py-1.5 rounded text-sm font-medium border transition-colors ${
                       (opt === 'Yes') === dp.shelter_present
                         ? 'border-accent bg-accent/20 text-accent'
@@ -395,9 +889,9 @@ export default function Step3() {
                     {opt}
                   </button>
                 ))}
-                {dp.shelter_present && (
-                  <span className="ml-2 self-center text-xs text-warning/80 italic">
-                    ψs = 0.5 stub — Figure 7.20 digitisation pending
+                {dp.shelter_present && computedShelterFactor === null && !shelterOverridden && (
+                  <span className="ml-2 self-center text-xs text-muted/60 italic">
+                    Enter x and φ to calculate ψs
                   </span>
                 )}
               </div>
@@ -415,20 +909,38 @@ export default function Step3() {
                   />
                 </Field>
 
-                <Field label="Solidity ratio φ" hint="1.0 = solid wall (most common)">
+                <Field label="Solidity ratio φ" hint="EN 1991-1-4 Fig 7.20: 1.0 = solid wall, 0.8 = porous. φ < 0.8 not covered — use ψs = 1.0.">
                   <select
                     className="field-input"
                     value={dp.shelter_phi ?? ''}
                     onChange={(e) => set({ shelter_phi: e.target.value ? parseFloat(e.target.value) : null })}
                   >
                     <option value="">— Select —</option>
-                    <option value={0.8}>0.8</option>
-                    <option value={0.9}>0.9</option>
+                    <option value={0.8}>0.8 (porous)</option>
                     <option value={1.0}>1.0 (solid)</option>
                   </select>
                 </Field>
               </>
             )}
+
+            <OverridableField
+              label="Shelter factor ψs"
+              hint={
+                dp.shelter_present && computedShelterFactor !== null && structureHeight != null && dp.shelter_x != null
+                  ? `Fig 7.20: x/h = ${(dp.shelter_x / structureHeight).toFixed(2)}, φ = ${dp.shelter_phi}`
+                  : dp.shelter_present
+                  ? 'Fill x and φ above — Fig 7.20 interpolation pending'
+                  : '1.0 = no shelter'
+              }
+              step={0.05}
+              value={{
+                ...dp.shelter_factor,
+                // Show live computed value in the field even before the store sync fires
+                calculated: computedShelterFactor ?? dp.shelter_factor.calculated,
+                effective: dp.shelter_factor.override ?? (computedShelterFactor ?? dp.shelter_factor.calculated),
+              }}
+              onChange={(v) => set({ shelter_factor: v })}
+            />
           </FieldGroup>
 
           {/* ── Post ── */}
@@ -583,7 +1095,11 @@ export default function Step3() {
           {calculation_results && (
             <div className="space-y-4 pt-2">
               <p className="text-xs font-semibold uppercase tracking-widest text-muted">Results</p>
-              <WindPanel wind={calculation_results.wind} />
+              <WindPanel
+                wind={calculation_results.wind}
+                vbOverridden={vbOverridden}
+                shelterOverridden={shelterOverridden}
+              />
               <SteelPanel steel={calculation_results.steel} />
               <FoundationPanel foundation={calculation_results.foundation} />
               <OverallBanner results={calculation_results} />

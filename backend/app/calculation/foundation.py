@@ -12,13 +12,19 @@ DA1 partial factors (code-reference.md Section 7.2):
   DA1-C1: γQ = 1.5, γφ = 1.0  → factored loads, unfactored strength
   DA1-C2: γQ = 1.3, γφ = 1.25 → moderately factored loads, factored strength
   SLS:    γQ = 1.0, γφ = 1.0  → unfactored
+
+Overturning check uses EQU.gamma_G_stb = 0.9 on the stabilising permanent
+load per EC7 EQU (confirmed P105). Applied to all three combinations.
+
+Notation: footing_L_m = dimension perpendicular to wind (PE report: L).
+          footing_B_m = dimension in wind direction (PE report: B).
 """
 
 from __future__ import annotations
 
 import math
 
-from .constants import DA1_C1, DA1_C2, DA1_SLS
+from .constants import DA1_C1, DA1_C2, DA1_SLS, EQU
 
 
 def _bearing_factors_drained(phi_d_deg: float) -> tuple[float, float, float]:
@@ -50,7 +56,7 @@ def _bearing_capacity_drained(
     gamma_s_kN_m3: float,
     q_kPa: float,
     B_m: float,
-    W_m: float,
+    L_m: float,
     e_m: float = 0.0,
 ) -> dict:
     """
@@ -62,8 +68,8 @@ def _bearing_capacity_drained(
         c_k_kPa:        characteristic cohesion c'k [kPa]
         gamma_s_kN_m3:  soil unit weight [kN/m³]
         q_kPa:          overburden pressure at foundation level = γs × D [kPa]
-        B_m:            footing width in wind direction [m]
-        W_m:            footing length perpendicular to wind [m]
+        B_m:            footing dimension in wind direction [m]
+        L_m:            footing dimension perpendicular to wind [m]
         e_m:            load eccentricity [m]; B' = B - 2e
     """
     phi_d_deg = phi_k_deg / gamma_phi
@@ -71,7 +77,7 @@ def _bearing_capacity_drained(
     c_d_kPa = c_k_kPa / gamma_phi
 
     B_prime = max(B_m - 2 * e_m, 0.01)  # effective width
-    L_prime = W_m  # perpendicular dimension unchanged
+    L_prime = L_m  # perpendicular dimension unchanged
 
     Nq, Nc, Ny = _bearing_factors_drained(phi_d_deg)
     sf = _shape_factors(B_prime, L_prime, phi_d_deg, Nq)
@@ -97,6 +103,7 @@ def _run_combination(
     label: str,
     gamma_Q: float,
     gamma_phi: float,
+    gamma_G_stb: float,
     fos_limit_sliding: float,
     fos_limit_overturning: float,
     H_SLS_kN: float,
@@ -108,29 +115,35 @@ def _run_combination(
     gamma_s_kN_m3: float,
     mu: float,
     B_m: float,
-    W_m: float,
+    L_m: float,
     D_m: float,
     q_overburden_kPa: float,
     Pp_kN: float = 0.0,
-    e_m: float = 0.0,
 ) -> dict:
     """Run one DA1 combination or SLS check and return results dict."""
     H = H_SLS_kN * gamma_Q
     M = M_SLS_kNm * gamma_Q
+
+    # Design friction angle (used for sliding in embedded branch and output)
+    phi_d_deg = phi_k_deg / gamma_phi
 
     if footing_type == "Exposed pad":
         # Sliding: μ × P_G (unfactored vertical favourable load)
         F_R_sliding = mu * P_G_kN
     else:
         # Embedded: tanφd × P_G + Pp (passive)
-        phi_d = math.radians(phi_k_deg / gamma_phi)
-        F_R_sliding = P_G_kN * math.tan(phi_d) + Pp_kN
+        phi_d_rad = math.radians(phi_d_deg)
+        F_R_sliding = P_G_kN * math.tan(phi_d_rad) + Pp_kN
 
     FOS_sliding = F_R_sliding / H if H > 0 else float("inf")
     pass_sliding = FOS_sliding >= fos_limit_sliding
 
-    # Overturning
-    M_Rd_overturning = P_G_kN * (B_m / 2) + (Pp_kN * D_m / 3 if footing_type == "Embedded RC" else 0.0)
+    # Overturning — γG,stb = 0.9 applied to stabilising permanent load per EC7 EQU
+    # ✅ CONFIRMED: P105 applies γG,stb throughout all overturning checks
+    M_Rd_overturning = (
+        P_G_kN * gamma_G_stb * (B_m / 2)
+        + (Pp_kN * D_m / 3 if footing_type == "Embedded RC" else 0.0)
+    )
     FOS_overturning = M_Rd_overturning / M if M > 0 else float("inf")
     pass_overturning = FOS_overturning >= fos_limit_overturning
 
@@ -141,15 +154,17 @@ def _run_combination(
     pass_bearing = True
 
     if footing_type == "Exposed pad":
-        A = B_m * W_m
+        A = B_m * L_m
         if e_bearing > B_m / 6:
-            b_prime = B_m - 2 * e_bearing
-            q_max = 4 * P_G_kN / (3 * W_m * b_prime) if b_prime > 0 else float("inf")
+            b_prime = max(B_m - 2 * e_bearing, 0.0)
+            q_max = 4 * P_G_kN / (3 * L_m * b_prime) if b_prime > 0 else float("inf")
         else:
+            b_prime = B_m  # full width effective — no eccentricity reduction
             q_max = P_G_kN / A * (1 + 6 * e_bearing / B_m)
         pass_bearing = q_max <= q_overburden_kPa  # q_overburden reused as q_allow for exposed
         bearing_result = {
             "e_m": round(e_bearing, 3),
+            "b_prime_m": round(b_prime, 3),
             "q_max_kPa": round(q_max, 2),
             "q_allow_kPa": round(q_overburden_kPa, 2),
             "UR_bearing": round(q_max / q_overburden_kPa, 3) if q_overburden_kPa > 0 else None,
@@ -162,19 +177,20 @@ def _run_combination(
             gamma_s_kN_m3=gamma_s_kN_m3,
             q_kPa=q_overburden_kPa,
             B_m=B_m,
-            W_m=W_m,
+            L_m=L_m,
             e_m=e_bearing,
         )
-        q_applied = P_G_kN / (bearing["B_prime_m"] * W_m)
+        q_applied = P_G_kN / (bearing["B_prime_m"] * L_m)
         pass_bearing = q_applied <= bearing["qu_kPa"]
         bearing_result = {
-            **bearing,
+            **bearing,  # includes phi_d_deg, Nq, Nc, Ny, sq, sc, sy, B_prime_m, qu_kPa
             "q_applied_kPa": round(q_applied, 2),
             "UR_bearing": round(q_applied / bearing["qu_kPa"], 3) if bearing["qu_kPa"] > 0 else None,
         }
 
     return {
         "label": label,
+        "phi_d_deg": round(phi_d_deg, 2),
         "H_factored_kN": round(H, 2),
         "M_factored_kNm": round(M, 2),
         "F_R_sliding_kN": round(F_R_sliding, 2),
@@ -201,7 +217,7 @@ def compute_foundation(
     c_k_kPa: float = 0.0,
     allowable_soil_bearing_kPa: float = 75.0,
     footing_B_m: float = 1.0,
-    footing_W_m: float = 1.0,
+    footing_L_m: float = 1.0,
     footing_D_m: float = 0.0,
 ) -> dict:
     """
@@ -217,17 +233,17 @@ def compute_foundation(
         c_k_kPa:                cohesion c'k [kPa] — user input
         allowable_soil_bearing_kPa: q_allow for exposed pad bearing [kPa]
         footing_B_m:            footing dimension in wind direction [m]
-        footing_W_m:            footing dimension perpendicular to wind [m]
+        footing_L_m:            footing dimension perpendicular to wind [m]  ← PE notation: L
         footing_D_m:            embedment depth below ground [m] (0 for exposed pad)
 
     Returns:
         Dict with SLS, DA1-C1, DA1-C2 results and overall pass/fail.
     """
     mu = 0.3  # base friction coefficient — ✅ CONFIRMED (Faber Walk), exposed pad only
+    gamma_G_stb = EQU["gamma_G_stb"]  # 0.9 — applied to stabilising permanent load
 
     # Passive earth resistance (used in embedded branch)
     # PROVISIONAL: P105 T1/T2 evaluate Pp = 0 — confirmed not relied upon in those reports.
-    # Computed here for completeness; override to 0 if not relied upon.
     q_overburden = gamma_s_kN_m3 * footing_D_m  # kPa overburden at base
 
     Pp_DA1C1 = 0.0  # passive not relied upon (see code-reference.md Section 7.4)
@@ -244,9 +260,10 @@ def compute_foundation(
         phi_k_deg=phi_k_deg,
         c_k_kPa=c_k_kPa,
         gamma_s_kN_m3=gamma_s_kN_m3,
+        gamma_G_stb=gamma_G_stb,
         mu=mu,
         B_m=footing_B_m,
-        W_m=footing_W_m,
+        L_m=footing_L_m,
         D_m=footing_D_m,
         q_overburden_kPa=q_overburden if footing_type == "Embedded RC" else q_ref_for_exposed,
     )
@@ -291,7 +308,7 @@ def compute_foundation(
             "gamma_s_kN_m3": gamma_s_kN_m3,
             "c_k_kPa": c_k_kPa,
             "footing_B_m": footing_B_m,
-            "footing_W_m": footing_W_m,
+            "footing_L_m": footing_L_m,
             "footing_D_m": footing_D_m,
         },
         "SLS": sls,
