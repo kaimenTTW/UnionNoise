@@ -26,6 +26,9 @@ function ProjectRow({ project }: { project: Project }) {
       <span className="w-24 shrink-0 text-xs text-muted">
         {new Date(project.created_at).toLocaleDateString('en-SG', { day: 'numeric', month: 'short', year: 'numeric' })}
       </span>
+      <span className="w-24 shrink-0 text-xs text-muted">
+        {new Date(project.updated_at).toLocaleDateString('en-SG', { day: 'numeric', month: 'short', year: 'numeric' })}
+      </span>
       <StatusBadge status={project.status} />
     </button>
   )
@@ -197,7 +200,8 @@ export default function OverviewPage() {
                 <span className="w-16 shrink-0 text-xs font-semibold uppercase tracking-wide text-muted">Type</span>
                 <span className="w-40 shrink-0 text-xs font-semibold uppercase tracking-wide text-muted">Location</span>
                 <span className="w-28 shrink-0 text-xs font-semibold uppercase tracking-wide text-muted">Created by</span>
-                <span className="w-24 shrink-0 text-xs font-semibold uppercase tracking-wide text-muted">Date</span>
+                <span className="w-24 shrink-0 text-xs font-semibold uppercase tracking-wide text-muted">Created</span>
+                <span className="w-24 shrink-0 text-xs font-semibold uppercase tracking-wide text-muted">Last edited</span>
                 <span className="w-16 shrink-0 text-xs font-semibold uppercase tracking-wide text-muted">Status</span>
               </div>
               {recentProjects.length === 0 ? (

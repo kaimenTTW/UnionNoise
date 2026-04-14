@@ -85,12 +85,13 @@ export default function ProjectsLibraryPage() {
           {/* Table */}
           <div className="rounded-lg border border-border overflow-hidden">
             {/* Column headers */}
-            <div className="grid grid-cols-[1fr_80px_180px_120px_110px_80px] gap-4 border-b border-border bg-panel px-4 py-2.5">
+            <div className="grid grid-cols-[1fr_80px_180px_120px_110px_110px_80px] gap-4 border-b border-border bg-panel px-4 py-2.5">
               <span className="text-xs font-semibold uppercase tracking-wide text-muted">Project Name</span>
               <span className="text-xs font-semibold uppercase tracking-wide text-muted">Type</span>
               <span className="text-xs font-semibold uppercase tracking-wide text-muted">Location</span>
               <span className="text-xs font-semibold uppercase tracking-wide text-muted">Created by</span>
-              <span className="text-xs font-semibold uppercase tracking-wide text-muted">Date</span>
+              <span className="text-xs font-semibold uppercase tracking-wide text-muted">Created</span>
+              <span className="text-xs font-semibold uppercase tracking-wide text-muted">Last edited</span>
               <span className="text-xs font-semibold uppercase tracking-wide text-muted">Status</span>
             </div>
 
@@ -103,7 +104,7 @@ export default function ProjectsLibraryPage() {
                 <button
                   key={p.id}
                   onClick={() => handleRowClick(p)}
-                  className="grid w-full grid-cols-[1fr_80px_180px_120px_110px_80px] gap-4 border-b border-border/50 px-4 py-3 text-left transition-colors hover:bg-white/[0.03] last:border-b-0"
+                  className="grid w-full grid-cols-[1fr_80px_180px_120px_110px_110px_80px] gap-4 border-b border-border/50 px-4 py-3 text-left transition-colors hover:bg-white/[0.03] last:border-b-0"
                 >
                   <span className="truncate text-sm font-medium text-white">{p.project_name}</span>
                   <span className="font-mono text-xs text-accent/80">{p.barrier_type}</span>
@@ -111,6 +112,11 @@ export default function ProjectsLibraryPage() {
                   <span className="truncate text-xs text-muted">{p.created_by}</span>
                   <span className="text-xs text-muted">
                     {new Date(p.created_at).toLocaleDateString('en-SG', {
+                      day: 'numeric', month: 'short', year: 'numeric',
+                    })}
+                  </span>
+                  <span className="text-xs text-muted">
+                    {new Date(p.updated_at).toLocaleDateString('en-SG', {
                       day: 'numeric', month: 'short', year: 'numeric',
                     })}
                   </span>

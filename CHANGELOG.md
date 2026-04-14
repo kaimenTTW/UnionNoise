@@ -1,5 +1,15 @@
 # CHANGELOG
 
+## [0.9.2] — 2026-04-14
+
+### Changed
+- Mock project `created_by` names updated to Rowena, Ryan, Conrad (replacing placeholder names)
+- "Date" column renamed to "Created" on both Overview and Projects Library pages
+- "Last edited" column added to Overview recent projects table and Projects Library table, displaying `updated_at` formatted as `d MMM yyyy`
+- Step 2 canvas: unselected alignment line colour changed from blue (`#3b82f6`) to grey (`#6b7280`); selected remains orange
+
+---
+
 ## [0.9.1] — 2026-04-11
 
 ### Fixed

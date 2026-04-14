@@ -19,7 +19,7 @@ const MOCK_PROJECTS: Project[] = [
     location: 'Clementi Ave 3, Singapore',
     created_at: '2026-03-15',
     updated_at: '2026-03-20T09:00:00Z',
-    created_by: 'Ahmad Razali',
+    created_by: 'Rowena',
     status: 'complete',
   },
   {
@@ -29,7 +29,7 @@ const MOCK_PROJECTS: Project[] = [
     location: 'Bayshore Road, Singapore',
     created_at: '2026-03-28',
     updated_at: '2026-03-29T14:30:00Z',
-    created_by: 'Priya Nair',
+    created_by: 'Ryan',
     status: 'draft',
   },
   {
@@ -39,7 +39,7 @@ const MOCK_PROJECTS: Project[] = [
     location: 'Punggol Field, Singapore',
     created_at: '2026-04-01',
     updated_at: '2026-04-02T11:15:00Z',
-    created_by: 'Wei Liang',
+    created_by: 'Conrad',
     status: 'draft',
   },
 ]

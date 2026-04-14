@@ -9,7 +9,7 @@ import type { SegmentRow } from '../types'
 const CANVAS_W = 740
 const CANVAS_H = 540
 const CAL_COLOR = '#f59e0b'
-const LINE_COLOR = '#3b82f6'
+const LINE_COLOR = '#6b7280'
 const LINE_COLOR_ACTIVE = '#f59e0b'
 const DOT_COLOR = '#22c55e'
 const DOT_COLOR_INACTIVE = '#6b7280'
