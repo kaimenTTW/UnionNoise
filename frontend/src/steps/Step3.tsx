@@ -791,7 +791,8 @@ export default function Step3() {
         // Effective ψs — respects any engineer override.
         // Uses computedShelterFactor directly (not the store) to avoid any sync lag.
         shelter_factor: dp.shelter_factor.override ?? (computedShelterFactor ?? dp.shelter_factor.calculated),
-        // TODO: wire dp.vb.effective to backend when calculate endpoint accepts a vb parameter
+        // Send vb only when overridden — backend defaults to SG NA 20 m/s when omitted.
+        vb: dp.vb.override !== null ? dp.vb.effective : undefined,
         post_spacing: dp.post_spacing,
         subframe_spacing: dp.subframe_spacing,
         post_length: dp.post_length,

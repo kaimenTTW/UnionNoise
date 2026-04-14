@@ -1,5 +1,14 @@
 # CHANGELOG
 
+## [0.9.3] — 2026-04-15
+
+### Added
+- `vb` override now wired end-to-end: frontend sends `dp.vb.effective` only when overridden (omitted otherwise so backend defaults to SG NA 20 m/s)
+- `compute_qp()` and `compute_design_pressure()` accept optional `vb` parameter — overrides `SG_NA["vb0"]` throughout the full wind chain (vm, qp, qb all recomputed with override vb)
+- `CalculateRequest` extended with optional `vb: float | None` field
+
+---
+
 ## [0.9.2] — 2026-04-14
 
 ### Changed

@@ -27,6 +27,7 @@ class CalculateRequest(BaseModel):
     # Wind
     structure_height: float = Field(..., description="Barrier height ze [m]. Drives qp calculation.")
     shelter_factor: float = Field(1.0, ge=0.0, le=1.0, description="ψs — 1.0 = no shelter. Use 0.5 for P105 validation.")
+    vb: float | None = Field(None, gt=0, description="Basic wind velocity [m/s]. Omit to use SG NA default of 20 m/s.")
 
     # Steel post
     post_spacing: float = Field(..., gt=0, description="Post spacing (tributary width) [m].")
@@ -140,6 +141,7 @@ def calculate(body: CalculateRequest) -> CalculateResponse:
         wind_raw = compute_design_pressure(
             structure_height=body.structure_height,
             shelter_factor=body.shelter_factor,
+            vb=body.vb,
         )
     except Exception as exc:
         raise HTTPException(status_code=422, detail=f"Wind calculation failed: {exc}") from exc

@@ -1,0 +1,76 @@
+{
+  "_note": "Standard base plate and anchor bolt configurations per post type. Source: Rowena / Union Noise drawings, April 2026.",
+  "_usage": "Connection checks use these as starting configurations. If any UR >= 1.0, upsize to next configuration in the list.",
+  "_ds_note": "Ds = distance between tension bolt row centroid and compression bolt row centroid. Derived from bolt layout geometry in drawings.",
+
+  "configurations": [
+    {
+      "id": "T2_M20_4bolt",
+      "post_type": "Type 2",
+      "typical_section": "UB 203x102x19.4",
+      "steel_grade": "S275",
+      "base_plate": {
+        "width_mm": 300,
+        "length_mm": 350,
+        "thickness_mm": 16
+      },
+      "bolts": {
+        "diameter_mm": 20,
+        "grade": "8.8",
+        "n_total": 4,
+        "n_tension": 2,
+        "n_shear": 4,
+        "embedment_mm": 400,
+        "Ds_mm": 200
+      },
+      "source": "Image 3 — Section 1b Base Plate drawing"
+    },
+    {
+      "id": "T1_M20_6bolt",
+      "post_type": "Type 1 (smaller)",
+      "typical_section": "UB 356x127x39",
+      "steel_grade": "S355",
+      "base_plate": {
+        "width_mm": 300,
+        "length_mm": 530,
+        "thickness_mm": 20
+      },
+      "bolts": {
+        "diameter_mm": 20,
+        "grade": "8.8",
+        "n_total": 6,
+        "n_tension": 2,
+        "n_shear": 6,
+        "embedment_mm": 400,
+        "Ds_mm": 200
+      },
+      "source": "Image 1 — Section B drawing"
+    },
+    {
+      "id": "T1_M24_6bolt",
+      "post_type": "Type 1 (larger)",
+      "typical_section": "UB 406x140x39",
+      "steel_grade": "S355",
+      "base_plate": {
+        "width_mm": 400,
+        "length_mm": 600,
+        "thickness_mm": 25
+      },
+      "bolts": {
+        "diameter_mm": 24,
+        "grade": "8.8",
+        "n_total": 6,
+        "n_tension": 2,
+        "n_shear": 6,
+        "embedment_mm": 650,
+        "Ds_mm": 300
+      },
+      "stiffener_plate": {
+        "present": true,
+        "dimensions_mm": "100x120x8",
+        "note": "8mm THK stiffener plate — confirm with PE whether this affects weld or bearing checks"
+      },
+      "source": "Image 2 — Section Type 1 Base Plate drawing"
+    }
+  ]
+}

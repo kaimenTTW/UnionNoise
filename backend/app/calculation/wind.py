@@ -16,7 +16,7 @@ import math
 from .constants import SG_NA
 
 
-def compute_qp(structure_height: float) -> dict:
+def compute_qp(structure_height: float, vb: float | None = None) -> dict:
     """
     Peak velocity pressure at reference height ze = structure_height.
 
@@ -25,8 +25,9 @@ def compute_qp(structure_height: float) -> dict:
 
     Args:
         structure_height: ze in metres. Clamped to zmin (2 m) per EC1.
+        vb:               basic wind velocity [m/s]. Defaults to SG NA 20 m/s.
     """
-    vb0 = SG_NA["vb0"]
+    vb0 = vb if vb is not None else SG_NA["vb0"]
     rho = SG_NA["rho"]
     kl = SG_NA["kl"]
     kr = SG_NA["kr"]
@@ -59,7 +60,11 @@ def compute_qp(structure_height: float) -> dict:
     }
 
 
-def compute_design_pressure(structure_height: float, shelter_factor: float) -> dict:
+def compute_design_pressure(
+    structure_height: float,
+    shelter_factor: float,
+    vb: float | None = None,
+) -> dict:
     """
     Full wind chain: qp → design_pressure.
 
@@ -73,14 +78,16 @@ def compute_design_pressure(structure_height: float, shelter_factor: float) -> d
     Args:
         structure_height: barrier height in metres (ze).
         shelter_factor:   ψs — feed 0.5 for P105 validation; 1.0 for no shelter.
+        vb:               basic wind velocity [m/s]. Defaults to SG NA 20 m/s.
+                          Override only when site-specific data justifies it (PE judgement).
     """
     cp_net = SG_NA["cp_net"]
     rho = SG_NA["rho"]
-    vb = SG_NA["vb0"]
+    vb = vb if vb is not None else SG_NA["vb0"]
     cdir = SG_NA["cdir"]
     cseason = SG_NA["cseason"]
 
-    qp_result = compute_qp(structure_height)
+    qp_result = compute_qp(structure_height, vb=vb)
     qp_kPa = qp_result["qp_kPa"]
     design_pressure_kPa = qp_kPa * cp_net * shelter_factor
 
