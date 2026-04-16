@@ -78,6 +78,8 @@ export interface DesignParameters {
   subframe_spacing: number | null
   /** Post length above foundation level (m). T1: 11m, T2: 12.7m. */
   post_length: number | null
+  /** Deflection limit denominator n for δ_allow = L/n. Default 65 (P105 confirmed). */
+  deflection_limit_n: number
 
   // ── Materials ──
   /** Concrete grade — default C25/30 per PE reports. */
@@ -126,6 +128,8 @@ export interface WindCalcResult {
   vb_m_per_s?: number
   cdir?: number
   cseason?: number
+  return_period?: number
+  Cprob?: number
   qb_N_per_m2?: number
   qb_kPa?: number
   cp_net: number
@@ -154,6 +158,7 @@ export interface SteelCalcResult {
   UR_shear?: number
   Lcr_mm?: number
   post_length_m?: number
+  deflection_limit_n?: number
   pass: boolean
   error?: string
 }

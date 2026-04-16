@@ -30,10 +30,10 @@ _PARTS_LIBRARY_PATH = Path(__file__).parent.parent / "data" / "parts_library.jso
 
 @lru_cache(maxsize=1)
 def _load_sections() -> list[dict]:
-    """Load parts library and sort ascending by Wpl_y_cm3 (lightest first)."""
+    """Load parts library and sort ascending by mass_kg_per_m (lightest first by weight)."""
     with _PARTS_LIBRARY_PATH.open() as f:
         data = json.load(f)
-    return sorted(data["sections"], key=lambda s: s["Wpl_y_cm3"])
+    return sorted(data["sections"], key=lambda s: s["mass_kg_per_m"])
 
 
 def compute_steel_design(
@@ -41,10 +41,11 @@ def compute_steel_design(
     post_spacing_m: float,
     subframe_spacing_m: float,
     post_length_m: float,
+    deflection_limit_n: float = 65,
 ) -> dict:
     """
     Select the lightest UB section from the parts library that satisfies
-    both the LTB moment check and the deflection check.
+    the LTB moment check, deflection check, and shear check.
 
     Args:
         design_pressure_kPa:  governing design wind pressure [kPa].
@@ -54,6 +55,7 @@ def compute_steel_design(
         post_length_m:        L above foundation level [m].
                               T1 (above ground 12m): 11m (1m in footing).
                               T2 (embedded): 12.7m (full embedment included).
+        deflection_limit_n:   denominator n for δ_allow = L/n. Default 65 (P105 confirmed).
 
     Returns:
         Dict with selected section properties and all check results,
@@ -122,7 +124,7 @@ def compute_steel_design(
         # code-reference.md Section 4.5: δ_allow = L / 65
         w_N_per_mm = w_kN_per_m  # numerical equivalence: 1 kN/m == 1 N/mm
         delta_mm = w_N_per_mm * L_mm ** 4 / (8 * E * Iy_mm4)
-        delta_allow_mm = L_mm / 65
+        delta_allow_mm = L_mm / deflection_limit_n
         UR_deflection = delta_mm / delta_allow_mm
 
         # ── Shear capacity check (EC3 Clause 6.2.6) ──
@@ -158,8 +160,14 @@ def compute_steel_design(
                 "Av_mm2": round(Av_mm2, 2),
                 "Vc_kN": round(Vc_kN, 2),
                 "UR_shear": round(UR_shear, 4),
+                "h_mm": sec["h_mm"],
+                "b_mm": sec["b_mm"],
+                "tf_mm": sec["tf_mm"],
+                "tw_mm": sec["tw_mm"],
+                "r_mm": sec["r_mm"],
                 "Lcr_mm": Lcr_mm,
                 "post_length_m": post_length_m,
+                "deflection_limit_n": deflection_limit_n,
                 "pass": True,
             }
 

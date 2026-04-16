@@ -71,6 +71,15 @@ STEEL: dict = {
     "gamma_s_steel": 78.5,  # kN/m³ — steel self-weight
 }
 
+# Bolt tensile stress areas — threaded (net) area per ISO 898-1 / EC3-1-8.
+# Used for all bolt capacity checks. Gross area over-estimates capacity.
+BOLT_STRESS_AREA: dict = {
+    16: 157,   # mm² — M16
+    20: 245,   # mm² — M20
+    24: 353,   # mm² — M24
+    30: 561,   # mm² — M30
+}
+
 CONCRETE: dict = {
     "fck_C2530": 25,  # N/mm² — characteristic cylinder strength
     "fck_C2835": 28,

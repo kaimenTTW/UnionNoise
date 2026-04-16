@@ -731,6 +731,15 @@ export default function Step3() {
   // Structure height: sourced from project_info.barrier_height (read-only display)
   const structureHeight = project_info.barrier_height ?? dp.structure_height
 
+  // Footing weight hint — estimates concrete-only weight from dimensions when all three are filled.
+  const footingWeightHint = useMemo(() => {
+    if (dp.footing_B_m && dp.footing_L_m && dp.footing_D_m) {
+      const est = dp.footing_B_m * dp.footing_L_m * dp.footing_D_m * 25
+      return `Footing concrete only: ~${est.toFixed(1)} kN (${dp.footing_B_m}×${dp.footing_L_m}×${dp.footing_D_m}m × 25 kN/m³). Add post self-weight.`
+    }
+    return 'Post + footing combined permanent vertical load'
+  }, [dp.footing_B_m, dp.footing_L_m, dp.footing_D_m])
+
   // Derive ψs from Figure 7.20 in real time.
   // Returns null when shelter_present=false or required inputs are incomplete.
   const computedShelterFactor = useMemo<number | null>(() => {
@@ -793,9 +802,11 @@ export default function Step3() {
         shelter_factor: dp.shelter_factor.override ?? (computedShelterFactor ?? dp.shelter_factor.calculated),
         // Send vb only when overridden — backend defaults to SG NA 20 m/s when omitted.
         vb: dp.vb.override !== null ? dp.vb.effective : undefined,
+        return_period: dp.return_period,
         post_spacing: dp.post_spacing,
         subframe_spacing: dp.subframe_spacing,
         post_length: dp.post_length,
+        deflection_limit_n: dp.deflection_limit_n,
         footing_type: dp.footing_type,
         phi_k: dp.phi_k,
         gamma_s: dp.gamma_s,
@@ -975,6 +986,15 @@ export default function Step3() {
                 onChange={(e) => set({ post_length: parseNum(e.target.value) })}
               />
             </Field>
+
+            <Field label="Deflection limit (L/n)" hint="Default n=65 — confirmed P105. Change only if PE specifies otherwise.">
+              <input
+                type="number" min={20} max={500} step={5}
+                className="field-input"
+                value={numericValue(dp.deflection_limit_n)}
+                onChange={(e) => set({ deflection_limit_n: parseNum(e.target.value) ?? 65 })}
+              />
+            </Field>
           </FieldGroup>
 
           {/* ── Foundation ── */}
@@ -1032,7 +1052,7 @@ export default function Step3() {
               />
             </Field>
 
-            <Field label="Self-weight G (kN)" hint="Post + footing combined permanent vertical load">
+            <Field label="Self-weight G (kN)" hint={footingWeightHint}>
               <input
                 type="number" min={0} step={1}
                 className="field-input"

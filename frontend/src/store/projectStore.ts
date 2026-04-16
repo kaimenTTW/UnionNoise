@@ -62,6 +62,7 @@ const defaultDesignParameters: DesignParameters = {
   post_spacing: 3.0,
   subframe_spacing: 1.5,
   post_length: null,
+  deflection_limit_n: 65,
   concrete_grade: 'C25/30',
   steel_grade: 'S275',
   rebar_grade: 'B500B',

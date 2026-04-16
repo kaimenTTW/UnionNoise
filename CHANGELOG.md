@@ -1,5 +1,81 @@
 # CHANGELOG
 
+## [0.10.2] — 2026-04-16
+
+### Changed
+- `connection_library.json`: added `_source_note` to all three configs — clarifies these are Rowena's standard reference drawings (April 2026), not confirmed to match any specific PE report plate layout. Ds_mm and embedment_mm require PE verification before submission.
+- `connection.py`: module docstring updated — P105 bolt tension validation targets removed. Formula is correct per EC3-1-8 Cl 3.6.1; P105 plate config (Ds, n_tension) is unconfirmed so no comparison applies.
+- `connection.py`: `validation_note` field added to `bolt_tension` return dict stating P105 target not used. `M_SLS_kNm` precision tightened to 2 d.p.
+- `connection.py` `__main__`: P105 expected-value annotations removed from sample run output.
+
+### Notes — Current connection check results (M_Ed=130.32 kNm, V_Ed=20.52 kN, T1_M24_6bolt)
+- `UR_bolt_tension = 0.712` — formula correct per EC3-1-8; Ds=300 mm from reference drawing
+- `UR_bolt_shear = 0.025`, `UR_bolt_combined = 0.534`, `UR_weld = 0.791`, `UR_base_plate = 0.009`, `UR_gclamp = 0.552` — all pass
+- `UR_bolt_embedment = 1.097` — marginal fail (L_required=713 mm, L_provided=650 mm). Pending PE clarification on embedment or config update.
+
+---
+
+## [0.10.1] — 2026-04-15
+
+### Fixed
+- `connection.py`: bolt tension check now uses SLS (unfactored) moment — `M_SLS = M_Ed / 1.5` — matching P105 methodology. `M_SLS_kNm` added to `bolt_tension` return dict.
+- `connection.py` + `constants.py`: all bolt checks now use threaded (net) stress area per ISO 898-1 / EC3-1-8. `BOLT_STRESS_AREA` dict added to `constants.py` (M16=157, M20=245, M24=353, M30=561 mm²). Gross area used as fallback for unlisted sizes.
+
+### Notes — P105 T2 post-fix validation
+- `UR_bolt_tension = 0.712` (improved from 0.834). Remaining gap to PE target 0.37 is Ds: config=300 mm, P105 layout~450 mm — pending PE drawing confirmation.
+- `UR_bolt_embedment = 1.097` (improved from 1.646). Still marginal fail — L_required=713 mm vs L_provided=650 mm. Pending PE clarification.
+- All other checks pass.
+
+---
+
+## [0.10.0] — 2026-04-15
+
+### Added
+- `backend/app/calculation/connection.py` — full connection checks per EC3-1-8 + EC2:
+  - Check 1: Bolt tension (EC3 Cl 3.6.1) — T_total = M_Ed/Ds, Ft per bolt, FT_Rd
+  - Check 2: Bolt shear (EC3 Cl 3.6.1) — Fv per bolt, Fv_Rd (αv=0.6)
+  - Check 3: Combined bolt (EC3 Table 3.4) — interaction check ≤ 1.0
+  - Check 4: Bolt embedment/bond length (EC2 Cl 8.4.2) — fbd, L_required vs L_provided
+  - Check 5: Weld (MoI method, P105 approach) — weld group second moment, resultant demand vs Fw,Rd
+  - Check 6: Base plate bearing (EC3 Annex I / T-stub) — effective bearing area, compression resistance
+  - Check 7: G clamp (STS test-based) — F_factored / failure_load; uses external pressure (qp × cp_net, pre-shelter)
+- Connection config auto-selected from section designation; configs loaded from `connection_library.json`
+- Connection wired into `POST /api/calculate` — runs after steel, result included in response as `connection` field (null if steel fails)
+- External pressure for G clamp derived as `qp_kPa × cp_net` in `calculate.py`
+- Section geometry (`h_mm`, `b_mm`, `tf_mm`, `tw_mm`, `r_mm`) added to steel module return dict and `SteelResult` Pydantic model
+
+### Notes — P105 T2 Validation (M_Ed=130.32 kNm, V_Ed=20.52 kN, UB406×140×39, T1_M24_6bolt)
+- `FT_Rd = 203.33 kN` — reduced from 260.58 kN after threaded area fix (As=353 mm² vs gross 452 mm²). PE target of 260.58 was computed with gross area.
+- `Ft_per_bolt = 144.80 kN`, `UR_bolt_tension = 0.712` — improved from 0.834 (M_SLS fix). Remaining gap to PE target of 96.53 kN / UR=0.37 is due to Ds: config has Ds=300 mm; P105 bolt layout uses ~450 mm arm. Pending Ds confirmation from PE drawings.
+- `UR_bolt_embedment = 1.097` — improved from 1.646 (threaded area fix). Still marginally fails: L_required=713 mm > L_provided=650 mm. Requires PE clarification on embedment adequacy or config update.
+- `weld_length = 1045 mm` vs P105 target ~1360 mm — discrepancy noted in response `weld_length_note`. P105 likely includes stiffener plate welds.
+- All other checks pass (bolt_shear UR=0.025, bolt_combined UR=0.534, base_plate UR=0.009, g_clamp UR=0.552)
+
+---
+
+## [0.9.4] — 2026-04-15
+
+### Fixed
+- `steel.py`: sort key changed from `Wpl_y_cm3` to `mass_kg_per_m` — selects lightest section by weight, matching PE methodology. Resolves T1/T2 section mismatch vs PE report.
+
+### Added
+- `steel.py`: `deflection_limit_n` parameter (default 65) replaces hardcoded `L/65`. Passed from frontend through `calculate.py`. Returned in response dict.
+- `wind.py`: `return_period` parameter + Cprob formula (EC1 Eq 4.2, K=0.2, n=0.5 SG NA confirmed). `return_period=50` → `Cprob=1.0` (no change to existing results). `return_period` and `Cprob` returned in response dict.
+- `calculate.py`: `return_period` and `deflection_limit_n` added to `CalculateRequest`; `return_period`/`Cprob` added to `WindResult`; `deflection_limit_n` added to `SteelResult`.
+- Step 3: `return_period` now sent in POST body (was captured in Zustand but not transmitted).
+- Step 3: `deflection_limit_n` field added to Post group (default 65, range 20–500).
+- Step 3: Footing weight helper hint below Self-weight G field — estimates concrete-only weight from B×L×D×25 kN/m³ when all three footing dimensions are filled; prompts engineer to add post self-weight.
+- `DesignParameters`: `deflection_limit_n: number` added to interface and store default.
+- `WindCalcResult`: `return_period?` and `Cprob?` optional fields added.
+- `SteelCalcResult`: `deflection_limit_n?` optional field added.
+
+### Notes
+- P105 validation confirmed after sort key fix: T1 → `356×127×33` ✓, T2 → `406×140×39` ✓ (PE expected sections)
+- `Cprob` at 50yr = 1.0 — no change to any existing project results
+- `return_period=50` is the default; changing to 10yr or 5yr reduces `vb_effective` and thus `design_pressure_kPa`
+
+---
+
 ## [0.9.3] — 2026-04-15
 
 ### Added

@@ -16,7 +16,7 @@ import math
 from .constants import SG_NA
 
 
-def compute_qp(structure_height: float, vb: float | None = None) -> dict:
+def compute_qp(structure_height: float, vb: float | None = None, return_period: int = 50) -> dict:
     """
     Peak velocity pressure at reference height ze = structure_height.
 
@@ -26,8 +26,18 @@ def compute_qp(structure_height: float, vb: float | None = None) -> dict:
     Args:
         structure_height: ze in metres. Clamped to zmin (2 m) per EC1.
         vb:               basic wind velocity [m/s]. Defaults to SG NA 20 m/s.
+        return_period:    T in years. Drives Cprob per EC1 Eq 4.2. Default 50yr → Cprob=1.0.
     """
-    vb0 = vb if vb is not None else SG_NA["vb0"]
+    vb_base = vb if vb is not None else SG_NA["vb0"]
+
+    # EC1 Equation 4.2 — probability factor Cprob (SG NA: K=0.2, n=0.5)
+    # At T=50yr: Cprob = 1.0 exactly (no change to P105 results)
+    K = 0.2
+    n_exp = 0.5
+    numerator = 1 - K * math.log(-math.log(1 - 1 / return_period))
+    denominator = 1 - K * math.log(-math.log(0.98))  # 50yr baseline
+    Cprob = (numerator / denominator) ** n_exp
+    vb0 = vb_base * Cprob
     rho = SG_NA["rho"]
     kl = SG_NA["kl"]
     kr = SG_NA["kr"]
@@ -64,6 +74,7 @@ def compute_design_pressure(
     structure_height: float,
     shelter_factor: float,
     vb: float | None = None,
+    return_period: int = 50,
 ) -> dict:
     """
     Full wind chain: qp → design_pressure.
@@ -80,27 +91,39 @@ def compute_design_pressure(
         shelter_factor:   ψs — feed 0.5 for P105 validation; 1.0 for no shelter.
         vb:               basic wind velocity [m/s]. Defaults to SG NA 20 m/s.
                           Override only when site-specific data justifies it (PE judgement).
+        return_period:    T in years. Drives Cprob per EC1 Eq 4.2. Default 50yr → Cprob=1.0.
     """
     cp_net = SG_NA["cp_net"]
     rho = SG_NA["rho"]
-    vb = vb if vb is not None else SG_NA["vb0"]
+    vb_base = vb if vb is not None else SG_NA["vb0"]
     cdir = SG_NA["cdir"]
     cseason = SG_NA["cseason"]
 
-    qp_result = compute_qp(structure_height, vb=vb)
+    qp_result = compute_qp(structure_height, vb=vb_base, return_period=return_period)
     qp_kPa = qp_result["qp_kPa"]
     design_pressure_kPa = qp_kPa * cp_net * shelter_factor
 
+    # Recover Cprob from qp_result to include in response
+    # (recomputed identically — avoids returning it from compute_qp which is a lower-level fn)
+    K = 0.2
+    n_exp = 0.5
+    numerator = 1 - K * math.log(-math.log(1 - 1 / return_period))
+    denominator = 1 - K * math.log(-math.log(0.98))
+    Cprob = round((numerator / denominator) ** n_exp, 4)
+    vb_effective = vb_base * Cprob
+
     # Basic wind pressure (height-independent reference)
-    # qb = 0.5 × ρ × vb²   P105 validation: qb = 238.80 N/m²
-    qb_N_per_m2 = 0.5 * rho * vb ** 2
+    # qb = 0.5 × ρ × vb_effective²   P105 validation: qb = 238.80 N/m²
+    qb_N_per_m2 = 0.5 * rho * vb_effective ** 2
     qb_kPa = qb_N_per_m2 / 1000
 
     return {
         **qp_result,
-        "vb_m_per_s": vb,
+        "vb_m_per_s": vb_effective,
         "cdir": cdir,
         "cseason": cseason,
+        "return_period": return_period,
+        "Cprob": Cprob,
         "qb_N_per_m2": round(qb_N_per_m2, 2),
         "qb_kPa": round(qb_kPa, 4),
         "cp_net": cp_net,

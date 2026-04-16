@@ -14,6 +14,7 @@ from typing import Literal
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
+from app.calculation.connection import compute_connection
 from app.calculation.foundation import compute_foundation
 from app.calculation.steel import compute_steel_design
 from app.calculation.wind import compute_design_pressure
@@ -28,11 +29,13 @@ class CalculateRequest(BaseModel):
     structure_height: float = Field(..., description="Barrier height ze [m]. Drives qp calculation.")
     shelter_factor: float = Field(1.0, ge=0.0, le=1.0, description="ψs — 1.0 = no shelter. Use 0.5 for P105 validation.")
     vb: float | None = Field(None, gt=0, description="Basic wind velocity [m/s]. Omit to use SG NA default of 20 m/s.")
+    return_period: int = Field(50, ge=1, description="Return period T [years]. Drives Cprob per EC1 Eq 4.2. Default 50yr → Cprob=1.0.")
 
     # Steel post
     post_spacing: float = Field(..., gt=0, description="Post spacing (tributary width) [m].")
     subframe_spacing: float = Field(..., gt=0, description="Subframe spacing = Lcr for LTB [m].")
     post_length: float = Field(..., gt=0, description="L above foundation level [m]. T1: 11m, T2: 12.7m.")
+    deflection_limit_n: float = Field(65.0, gt=0, description="Deflection limit denominator n for δ_allow = L/n. Default 65 (P105 confirmed).")
 
     # Foundation
     footing_type: Literal["Exposed pad", "Embedded RC"] = Field(
@@ -67,6 +70,8 @@ class WindResult(BaseModel):
     vb_m_per_s: float
     cdir: float
     cseason: float
+    return_period: int
+    Cprob: float
     qb_N_per_m2: float
     qb_kPa: float
     cp_net: float
@@ -93,13 +98,31 @@ class SteelResult(BaseModel):
     Av_mm2: float | None = None
     Vc_kN: float | None = None
     UR_shear: float | None = None
+    h_mm: float | None = None
+    b_mm: float | None = None
+    tf_mm: float | None = None
+    tw_mm: float | None = None
+    r_mm: float | None = None
     Lcr_mm: float | None = None
     post_length_m: float | None = None
+    deflection_limit_n: float | None = None
     pass_: bool = Field(False, alias="pass")
     error: str | None = None
 
     class Config:
         populate_by_name = True
+
+
+class ConnectionResult(BaseModel):
+    config_id: str
+    bolt_tension: dict
+    bolt_shear: dict
+    bolt_combined: dict
+    bolt_embedment: dict
+    weld: dict
+    base_plate: dict
+    g_clamp: dict
+    all_checks_pass: bool
 
 
 class FoundationResult(BaseModel):
@@ -118,6 +141,7 @@ class CalculateResponse(BaseModel):
     wind: WindResult
     steel: SteelResult
     foundation: FoundationResult
+    connection: ConnectionResult | None = None
 
 
 # ── Endpoint ──────────────────────────────────────────────────────────────────
@@ -142,6 +166,7 @@ def calculate(body: CalculateRequest) -> CalculateResponse:
             structure_height=body.structure_height,
             shelter_factor=body.shelter_factor,
             vb=body.vb,
+            return_period=body.return_period,
         )
     except Exception as exc:
         raise HTTPException(status_code=422, detail=f"Wind calculation failed: {exc}") from exc
@@ -155,6 +180,7 @@ def calculate(body: CalculateRequest) -> CalculateResponse:
             post_spacing_m=body.post_spacing,
             subframe_spacing_m=body.subframe_spacing,
             post_length_m=body.post_length,
+            deflection_limit_n=body.deflection_limit_n,
         )
     except Exception as exc:
         raise HTTPException(status_code=422, detail=f"Steel calculation failed: {exc}") from exc
@@ -164,7 +190,26 @@ def calculate(body: CalculateRequest) -> CalculateResponse:
     else:
         steel_result = SteelResult(**{**steel_raw})
 
-    # ── 3. Foundation ──
+    # ── 3. Connection ──
+    connection_result: ConnectionResult | None = None
+    if not steel_raw.get("error") and steel_raw.get("M_Ed_kNm") and steel_raw.get("V_Ed_kN"):
+        try:
+            # External pressure for G clamp = qp × cp_net (pre-shelter, pre-cp,net reduction)
+            external_pressure_kPa = wind_raw["qp_kPa"] * wind_raw["cp_net"]
+            connection_raw = compute_connection(
+                M_Ed_kNm=steel_raw["M_Ed_kNm"],
+                V_Ed_kN=steel_raw["V_Ed_kN"],
+                section=steel_raw,
+                fck_N_per_mm2=25.0,
+                external_pressure_kPa=external_pressure_kPa,
+                post_spacing_m=body.post_spacing,
+                barrier_height_m=body.structure_height,
+            )
+            connection_result = ConnectionResult(**connection_raw)
+        except Exception as exc:
+            raise HTTPException(status_code=422, detail=f"Connection calculation failed: {exc}") from exc
+
+    # ── 4. Foundation ──
     # Derive SLS forces from steel calculation:
     # H_SLS = w × L (unfactored — divide ULS V_Ed by γQ = 1.5)
     # M_SLS = w × L² / 2 (unfactored — divide ULS M_Ed by γQ = 1.5)
@@ -200,4 +245,5 @@ def calculate(body: CalculateRequest) -> CalculateResponse:
         wind=wind_result,
         steel=steel_result,
         foundation=foundation_result,
+        connection=connection_result,
     )

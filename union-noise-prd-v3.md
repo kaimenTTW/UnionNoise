@@ -159,7 +159,11 @@ The calculations are NOT independent modules — they form a dependency chain:
 
 Changing an upstream parameter (e.g., wind speed) must propagate through the entire chain.
 
-**Utilization target ✅ CONFIRMED (PE calculation report):** The governing rule is UR < 1.0 across all checks. There is no mandatory 0.9 lower bound — that was CR208-specific. Individual checks in the PE report range from 0.05 to 0.97. The system must flag UR ≥ 1.0 as a hard failure. Surfacing under-utilization as a warning is a nice-to-have, not a requirement.
+**Utilization target ✅ CONFIRMED (PE calculation report):** The governing rule is UR < 1.0 across all checks. There is no mandatory 0.9 lower bound — that was CR208-specific. Individual checks in the PE report range from 0.05 to 0.97. The system must flag UR ≥ 1.0 as a hard failure.
+
+**Optimisation rule:** A section is considered optimised when at least one UR ≥ 0.95 across the three post checks (moment, deflection, shear). The rationale: if one check is at 95% capacity, the section is close to its limit — upsizing would waste material. Having all three simultaneously near 95% is physically unlikely because moment, deflection, and shear govern at different geometries. The engine should flag when a selected section is potentially over-conservative (all URs below 0.60) as a suggestion to re-examine inputs, but this is advisory only — the engineer decides.
+
+**Deflection limit:** The standard allowable deflection is L/n where n is user-configurable. Default n = 65 (confirmed P105). The PE may specify a different limit (e.g. L/200 for sensitive structures). This must be a user input in Step 3 with 65 as the default — it must not be hardcoded.
 
 #### 2.3 Code Clause References
 
@@ -300,7 +304,7 @@ This is the confirmed treatment for TNCB panels in all P105 reports. The zone-ba
 - Steel self-weight: 78.5 kN/m³
 - Concrete self-weight: 25 kN/m³
 - Load combinations: **ULS = 1.35 DL + 1.5 LL + 1.05 WL**, **SLS = 1.0 DL + 1.0 LL + 1.0 WL**
-- Deflection limit: **L/65** (cantilever span)
+- Deflection limit: **L/n where n is user-configurable, default n = 65** (confirmed P105). Must not be hardcoded — add as a Step 3 input field with 65 as the default value.
 - Base friction coefficient: 0.3 (for sliding check, exposed footing type)
 - Soil bearing capacity default: **75 kPa** when no site investigation available ✅ (kickoff meeting); P105 uses 120 kPa minimum — allowable soil bearing pressure is a user input, not a constant
 
@@ -327,23 +331,74 @@ Default values pending SME confirmation: φk = 30°, γs = 20 kN/m³, c'k = 0 kN
 
 **Allowances** should be backed by mathematical implications and reference historical allowances approved in past projects.
 
-#### 2.6 Pre-Approved Parts Library (Database)
+#### 2.6 Member Selection — No Fixed Inventory
 
-The system must query a **database of pre-approved structural members** that the client actually uses. This prevents the AI from recommending non-existent or unapproved components.
+The company does not maintain a fixed parts inventory. They order from various suppliers based on project needs and availability — confirmed April 2026. This means:
 
-**Member types include:**
-- Steel posts / UB sections (various sizes and grades) — varies significantly per project
-- Base plates (various sizes and thicknesses) — driven by calculation outputs
-- Cast-in bolts / anchor bolts (types, diameters, embedment depths)
-- Foundation types (varies per site — do not assume a single standard type)
-- Noise barrier panels (types, dimensions, acoustic ratings) ⚠️ PROVISIONAL — 2000×500×33mm seen in both CR208 and Bayshore C2 but this is Hebei Jinbiao's own product; dimensions may vary by project or panel type; treat as a selectable parameter not a constant
-- Subframe members — pipe size and spacing vary per project
-- Rebar specifications
-- Lifting hooks and lugs
+- A local parts library as the primary source of truth is the wrong approach
+- The system must retrieve section properties from supplier sources at design time
+- Continental Steel Singapore (continentalsteel.com.sg) is a confirmed primary source
+- Other suppliers are used as needed — the system should not be locked to one source
+- `parts_library.json` is retained as a **cache and offline fallback only** — not the primary source
 
-> **Critical:** No member dimension or grade should be hardcoded in the system. Every member is a selectable input drawn from the parts library. The parts library itself is ❌ MISSING — scaffold the database structure now, populate with real data when received from client.
+**Member selection workflow:**
 
-**Architecture:** Backend database exposed to the system. During the design loop, the engineering rules engine queries available members, checks whether the current configuration satisfies all calculations, and if not, suggests the next viable option from the library.
+```
+1. Compute M_Ed from wind + post geometry (deterministic)
+2. AI web search: query supplier for lightest UB section
+   where Mb,Rd > M_Ed after LTB reduction
+3. Engine verifies retrieved section against all three checks:
+   UR_moment, UR_deflection (L/n), UR_shear
+4. If any check fails → AI retrieves next heavier section → retry
+5. Optimisation gate: max(UR_moment, UR_deflection, UR_shear) >= 0.95
+   → section accepted as optimised
+   All URs < 0.60 → flag as potentially over-conservative (advisory)
+6. Section fixed → all downstream calculations use its geometry
+```
+
+**Sort key for local fallback:** `mass_kg_per_m` ascending. Not `Wpl_y_cm3` — sorting by Wpl_y can incorrectly prefer a heavier section with marginally lower Wpl_y.
+
+**Fixed standard components (not retrieved from supplier):**
+
+From Rowena's confirmed drawings (April 2026):
+- Subframe: CHS Ø48.3×2.4mm GI pipe — fixed spec, not ordered per project
+- Noise barrier panels: 500×2000×33mm — fixed Hebei Jinbiao product
+- Panel guides: proprietary double channel — fixed spec
+- Non-shrink grout: Quickseal NSG 55 MPa, 50mm thickness — fixed spec
+- Temperature bars and bar chair: require calculation per project
+
+**Bolt layout geometry (fixed standard — confirmed from drawings):**
+- Edge distance from bolt centre to plate edge: 50 mm
+- Distance from bolt centre to beam flange face: 50 mm
+- Ds (lever arm) is fully determined by these fixed dimensions plus the base plate height
+- No user input required for bolt positions — they are derived
+
+---
+
+**Data file roles — current state and evolution path:**
+
+The system uses two JSON data files whose purpose has evolved as the project understanding has developed. Both are documented here explicitly.
+
+**`parts_library.json` — UB section properties cache**
+
+Contains 107 universal beam sections with full section properties (Iy, Iz, Iw, It, Wpl, Wel, h, b, tf, tw, r, mass). These are industry-standard physical constants — not Union Noise's inventory. Any steel supplier stocks these sections and the properties never change between suppliers.
+
+Current role: offline fallback cache used when AI web search is unavailable.
+Primary source: AI web search of Continental Steel Singapore and other suppliers at design time.
+Evolution: when Session 4 (AI retrieval) is built, code must explicitly attempt web search first and fall back to this file only on failure.
+
+**`connection_library.json` — standard practice reference (prototype only)**
+
+Contains three base plate and bolt configurations derived from Rowena's P105 drawings. These are not a catalogue — they represent past practice on specific projects.
+
+Current role (prototype): lookup table for the Session 2 connection checks. Used to provide working validation numbers against P105 and avoid placeholder values during development.
+Future role: to be refactored into a **standard practice constants file** storing fixed geometric rules (edge distance = 50mm, standard embedment = 400mm, weld size rules) rather than specific project configurations. Base plate dimensions, bolt count, and Ds will become calculation outputs derived from M_Ed, V_Ed, and the selected section geometry — not looked up from this file.
+When to refactor: after Session 2 is validated against P105. Do not refactor before validation — the current configs are needed for the P105 bolt tension UR = 0.37 target.
+
+**In summary:**
+- Neither file is a permanent inventory or catalogue
+- `parts_library.json` stays as-is indefinitely as a fallback cache
+- `connection_library.json` is a temporary prototype scaffold — expect to refactor after Session 2 validation
 
 #### 2.7 Structural Acceptance Gate ✅ CONFIRMED (PE calculation report)
 
@@ -476,7 +531,9 @@ Confirmed: Lcr = 1500mm at 1.5m subframe spacing (both 3m and 6m post spacing pr
 **Steel Design — Deflection Check (✅ confirmed across all three reports)**
 ```
 Actual deflection:  δ = w × L⁴ / (8 × E × I)                            [mm]
-Allowable:          δ_allow = L / 65                                       [mm]
+Allowable:          δ_allow = L / n                                        [mm]
+                    n = user input, default 65 (confirmed P105)
+                    n must NOT be hardcoded — it is a Step 3 input field
 UR:                 δ / δ_allow < 1.0
 ```
 

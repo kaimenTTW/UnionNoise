@@ -9,6 +9,7 @@
       "post_type": "Type 2",
       "typical_section": "UB 203x102x19.4",
       "steel_grade": "S275",
+      "_source_note": "Standard reference configuration from Rowena drawings, April 2026. Not confirmed to match any specific PE report plate layout. Ds_mm and embedment_mm are from the reference drawing — verify against actual PE submission before use.",
       "base_plate": {
         "width_mm": 300,
         "length_mm": 350,
@@ -30,6 +31,7 @@
       "post_type": "Type 1 (smaller)",
       "typical_section": "UB 356x127x39",
       "steel_grade": "S355",
+      "_source_note": "Standard reference configuration from Rowena drawings, April 2026. Not confirmed to match any specific PE report plate layout. Ds_mm and embedment_mm are from the reference drawing — verify against actual PE submission before use.",
       "base_plate": {
         "width_mm": 300,
         "length_mm": 530,
@@ -51,6 +53,7 @@
       "post_type": "Type 1 (larger)",
       "typical_section": "UB 406x140x39",
       "steel_grade": "S355",
+      "_source_note": "Standard reference configuration from Rowena drawings, April 2026. Not confirmed to match any specific PE report plate layout. Ds_mm and embedment_mm are from the reference drawing — verify against actual PE submission before use.",
       "base_plate": {
         "width_mm": 400,
         "length_mm": 600,
