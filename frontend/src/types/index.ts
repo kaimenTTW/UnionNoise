@@ -92,6 +92,8 @@ export interface DesignParameters {
   bolt_grade: BoltGrade             // default '8.8'
 
   // ── Foundation ──
+  /** Concrete characteristic cylinder strength fck [N/mm²]. C25/30→25, C28/35→28, C30/37→30. */
+  fck: number                        // default 25
   /** Footing type — drives which branch of the foundation module executes. */
   footing_type: FootingType | null
   /** Allowable soil bearing pressure (kPa). Default 75 kPa if no site investigation. */

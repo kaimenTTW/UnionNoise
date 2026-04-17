@@ -808,6 +808,7 @@ export default function Step3() {
         post_length: dp.post_length,
         deflection_limit_n: dp.deflection_limit_n,
         footing_type: dp.footing_type,
+        fck: dp.fck ?? 25,
         phi_k: dp.phi_k,
         gamma_s: dp.gamma_s,
         cohesion_ck: dp.cohesion_ck,
@@ -1009,6 +1010,15 @@ export default function Step3() {
                 <option value="Exposed pad">Above Ground (Exposed pad)</option>
                 <option value="Embedded RC">Embedded RC footing</option>
               </select>
+            </Field>
+
+            <Field label="Concrete grade fck (N/mm²)" hint="C25/30 → 25, C28/35 → 28, C30/37 → 30. Check project specification.">
+              <input
+                type="number" min={20} max={50} step={1}
+                className="field-input"
+                value={dp.fck ?? 25}
+                onChange={(e) => set({ fck: parseFloat(e.target.value) || 25 })}
+              />
             </Field>
 
             {dp.footing_type === 'Exposed pad' && (

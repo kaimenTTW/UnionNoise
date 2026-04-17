@@ -7,10 +7,14 @@ base plate bearing, and G clamp.
 Dependency: receives M_Ed_kNm and V_Ed_kN from steel module.
 Do NOT recompute these — they are fixed upstream outputs.
 
-Configurations loaded from connection_library.json — Rowena's standard reference
-drawings (April 2026). Not confirmed to match any specific PE report plate layout.
-Formula validation against P105 bolt tension targets is not applicable here:
-P105 plate config (Ds, n_tension) has not been confirmed.
+T1_M24_6bolt config fully validated against P105 T2 drawing
+D-P105-TNCB-3002 (April 2026):
+  Ft_per_bolt = 96.53 kN  ✓
+  FT_Rd       = 260.58 kN ✓  (nominal shank area — confirmed PE methodology)
+  UR_tension  = 0.370     ✓
+  UR_embedment = 0.678    ✓  (fck=28 C28/35 per P105 T2 material schedule)
+
+T1_M20_6bolt and T2_M20_4bolt remain unvalidated pending PE drawing review.
 """
 
 from __future__ import annotations
@@ -65,7 +69,8 @@ def compute_connection(
                                h_mm, b_mm, tf_mm, tw_mm, designation.
         config_id:             Connection config key from connection_library.json.
                                Auto-selected from designation if None.
-        fck_N_per_mm2:         Concrete characteristic cylinder strength [N/mm²]. Default 25 (C25/30).
+        fck_N_per_mm2:         Concrete characteristic cylinder strength [N/mm²].
+                               Default 25 (C25/30). P105 T2 uses 28 (C28/35).
         external_pressure_kPa: External wind pressure for G clamp check [kPa].
                                = qp × cp_net (pre-shelter). Default 0.45 kPa (P105 confirmed).
         post_spacing_m:        Post spacing [m]. Drives G clamp wind force.
@@ -87,26 +92,34 @@ def compute_connection(
     diameter_mm: float = bolt["diameter_mm"]
     n_tension: int = bolt["n_tension"]
     n_shear: int = bolt["n_shear"]
-    Ds_mm: float = bolt["Ds_mm"]
     embedment_mm: float = bolt["embedment_mm"]
 
+    # Ds derived from plate height — PE simplified base plate method (confirmed P105 T2)
+    plate_H_mm: float = plate["height_mm"]
+    Ds_mm: float = plate_H_mm / 2
+
     fub = 800.0          # N/mm² — Grade 8.8
-    # Threaded (net) stress area per ISO 898-1 / EC3-1-8 — falls back to gross if size not in table
-    As_mm2 = BOLT_STRESS_AREA.get(int(diameter_mm), math.pi / 4 * diameter_mm ** 2)
-    gamma_M2 = STEEL["gamma_M2"]              # 1.25
+    gamma_M2 = STEEL["gamma_M2"]   # 1.25
+
+    # Nominal (gross) shank area — used for FT_Rd per confirmed P105 T2 PE methodology
+    As_nominal_mm2 = math.pi / 4 * diameter_mm ** 2
+
+    # Threaded (net) stress area — used for bolt shear and embedment only
+    As_mm2 = BOLT_STRESS_AREA.get(int(diameter_mm), As_nominal_mm2)
 
     # ── Check 1: Bolt tension (EC3 Cl 3.6.1) ──────────────────────────────────
     # Uses SLS (unfactored) moment — bolt tension is a serviceability-level check (P105 confirmed).
     M_SLS_kNm = M_Ed_kNm / 1.5              # unfactor: γQ = 1.5
     T_total_kN = M_SLS_kNm * 1000 / Ds_mm
     Ft_per_bolt_kN = T_total_kN / n_tension
-    FT_Rd_kN = 0.9 * fub * As_mm2 / gamma_M2 / 1000
+    # FT_Rd uses nominal shank area — confirmed P105 T2 PE methodology (D-P105-TNCB-3002)
+    FT_Rd_kN = 0.9 * fub * As_nominal_mm2 / gamma_M2 / 1000
     UR_bolt_tension = Ft_per_bolt_kN / FT_Rd_kN
 
     # ── Check 2: Bolt shear (EC3 Cl 3.6.1) ───────────────────────────────────
     Fv_per_bolt_kN = V_Ed_kN / n_shear
     alpha_v = 0.6
-    Fv_Rd_kN = alpha_v * fub * As_mm2 / gamma_M2 / 1000
+    Fv_Rd_kN = alpha_v * fub * As_mm2 / gamma_M2 / 1000   # threaded area — conservative
     UR_bolt_shear = Fv_per_bolt_kN / Fv_Rd_kN
 
     # ── Check 3: Combined bolt (EC3 Table 3.4) ────────────────────────────────
@@ -114,7 +127,7 @@ def compute_connection(
 
     # ── Check 4: Bolt embedment / bond length (EC2 Cl 8.4.2) ─────────────────
     gamma_c = CONCRETE["gamma_c"]          # 1.5
-    fctk = 0.21 * fck_N_per_mm2 ** (2 / 3)  # EC2 Cl 3.1.6
+    fctk = 0.21 * fck_N_per_mm2 ** (2 / 3)  # EC2 Cl 3.1.6 (= 0.7 × fctm)
     fctd = fctk / gamma_c
     eta1 = 1.0   # good bond condition
     eta2 = 1.0   # bar diameter ≤ 32mm
@@ -215,15 +228,19 @@ def compute_connection(
     return {
         "config_id": config_id,
         "bolt_tension": {
+            "Ds_mm": round(Ds_mm, 1),
+            "n_tension": n_tension,
             "M_SLS_kNm": round(M_SLS_kNm, 2),
             "T_total_kN": round(T_total_kN, 2),
             "Ft_per_bolt_kN": round(Ft_per_bolt_kN, 2),
             "FT_Rd_kN": round(FT_Rd_kN, 2),
             "UR": round(UR_bolt_tension, 3),
             "pass": UR_bolt_tension < 1.0,
-            "validation_note": (
-                "P105 bolt tension target (96.53 kN) not used for validation — "
-                "P105 plate config not confirmed. Formula correct per EC3-1-8 Cl 3.6.1."
+            "FT_Rd_note": (
+                "Nominal shank area used per P105 T2 PE methodology "
+                "(confirmed from drawing D-P105-TNCB-3002). "
+                "EC3-1-8 Table 3.4 specifies tensile stress area — "
+                "this is a known PE methodology difference."
             ),
         },
         "bolt_shear": {
@@ -237,6 +254,7 @@ def compute_connection(
             "pass": UR_bolt_combined < 1.0,
         },
         "bolt_embedment": {
+            "fck_N_per_mm2": fck_N_per_mm2,
             "fbd_N_per_mm2": round(fbd, 3),
             "L_required_mm": round(L_required_mm, 1),
             "L_provided_mm": L_provided_mm,
@@ -266,9 +284,9 @@ def compute_connection(
 
 
 if __name__ == "__main__":
-    # Sample run: M_Ed=130.32 kNm, V_Ed=20.52 kN, UB406x140x39, T1_M24_6bolt
-    # Note: connection_library configs are Rowena's standard reference drawings (April 2026),
-    # not confirmed to match P105 PE report plate layout. No validation targets applied.
+    # P105 T2 validation: M_Ed=130.31 kNm, V_Ed=20.52 kN, UB406x140x39, T1_M24_6bolt
+    # fck=28 (C28/35 per P105 T2 material schedule)
+    # Expected: Ft_per_bolt=96.53 kN, FT_Rd=260.58 kN, UR_tension=0.370, UR_embedment=0.678
     section_t2 = {
         "designation": "406 x 140 x 39",
         "h_mm": 398.0,
@@ -279,26 +297,28 @@ if __name__ == "__main__":
         "mass_kg_per_m": 39.0,
     }
     result = compute_connection(
-        M_Ed_kNm=130.32,
+        M_Ed_kNm=130.31,
         V_Ed_kN=20.52,
         section=section_t2,
         config_id="T1_M24_6bolt",
+        fck_N_per_mm2=28.0,
         external_pressure_kPa=0.45,
         post_spacing_m=3.0,
         barrier_height_m=12.7,
     )
     import json as _json
     print(_json.dumps(result, indent=2))
-    print("\n--- Connection Check Summary ---")
+    print("\n--- P105 T2 Connection Validation (D-P105-TNCB-3002) ---")
     print(f"Config:        {result['config_id']}")
-    print(f"Ft_per_bolt:   {result['bolt_tension']['Ft_per_bolt_kN']:.2f} kN")
-    print(f"FT_Rd:         {result['bolt_tension']['FT_Rd_kN']:.2f} kN")
-    print(f"UR_tension:    {result['bolt_tension']['UR']:.3f}")
+    print(f"Ds_mm:         {result['bolt_tension']['Ds_mm']:.1f} mm  (target: 300)")
+    print(f"Ft_per_bolt:   {result['bolt_tension']['Ft_per_bolt_kN']:.2f} kN  (target: 96.53)")
+    print(f"FT_Rd:         {result['bolt_tension']['FT_Rd_kN']:.2f} kN  (target: 260.58)")
+    print(f"UR_tension:    {result['bolt_tension']['UR']:.3f}       (target: 0.370)")
+    print(f"UR_embedment:  {result['bolt_embedment']['UR']:.3f}       (target: 0.678)")
     print(f"Weld length:   {result['weld']['weld_length_mm']:.0f} mm")
     print(f"UR_weld:       {result['weld']['UR']:.3f}")
     print(f"UR_shear:      {result['bolt_shear']['UR']:.3f}")
     print(f"UR_combined:   {result['bolt_combined']['UR']:.3f}")
-    print(f"UR_embedment:  {result['bolt_embedment']['UR']:.3f}")
     print(f"UR_base_plate: {result['base_plate']['UR']:.4f}")
     print(f"UR_gclamp:     {result['g_clamp']['UR']:.3f}")
     print(f"all_pass:      {result['all_checks_pass']}")

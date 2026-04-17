@@ -1,7 +1,7 @@
 {
   "_note": "Standard base plate and anchor bolt configurations per post type. Source: Rowena / Union Noise drawings, April 2026.",
   "_usage": "Connection checks use these as starting configurations. If any UR >= 1.0, upsize to next configuration in the list.",
-  "_ds_note": "Ds = distance between tension bolt row centroid and compression bolt row centroid. Derived from bolt layout geometry in drawings.",
+  "_ds_derivation": "Ds = base_plate.height_mm / 2 — PE simplified base plate method. Ds is derived in code, not stored.",
 
   "configurations": [
     {
@@ -9,10 +9,10 @@
       "post_type": "Type 2",
       "typical_section": "UB 203x102x19.4",
       "steel_grade": "S275",
-      "_source_note": "Standard reference configuration from Rowena drawings, April 2026. Not confirmed to match any specific PE report plate layout. Ds_mm and embedment_mm are from the reference drawing — verify against actual PE submission before use.",
+      "_source_note": "Standard reference configuration from Rowena drawings, April 2026. Not confirmed to match any specific PE report plate layout. Verify before submission.",
       "base_plate": {
         "width_mm": 300,
-        "length_mm": 350,
+        "height_mm": 350,
         "thickness_mm": 16
       },
       "bolts": {
@@ -22,7 +22,7 @@
         "n_tension": 2,
         "n_shear": 4,
         "embedment_mm": 400,
-        "Ds_mm": 200
+        "_Ds_note": "Ds derived as plate_height/2 = 350/2 = 175mm. Unvalidated — pending PE drawing review."
       },
       "source": "Image 3 — Section 1b Base Plate drawing"
     },
@@ -31,10 +31,10 @@
       "post_type": "Type 1 (smaller)",
       "typical_section": "UB 356x127x39",
       "steel_grade": "S355",
-      "_source_note": "Standard reference configuration from Rowena drawings, April 2026. Not confirmed to match any specific PE report plate layout. Ds_mm and embedment_mm are from the reference drawing — verify against actual PE submission before use.",
+      "_source_note": "Standard reference configuration from Rowena drawings, April 2026. Not confirmed to match any specific PE report plate layout. Verify before submission.",
       "base_plate": {
         "width_mm": 300,
-        "length_mm": 530,
+        "height_mm": 530,
         "thickness_mm": 20
       },
       "bolts": {
@@ -44,7 +44,7 @@
         "n_tension": 2,
         "n_shear": 6,
         "embedment_mm": 400,
-        "Ds_mm": 200
+        "_Ds_note": "Ds derived as plate_height/2 = 530/2 = 265mm. Unvalidated — pending PE drawing review."
       },
       "source": "Image 1 — Section B drawing"
     },
@@ -52,28 +52,32 @@
       "id": "T1_M24_6bolt",
       "post_type": "Type 1 (larger)",
       "typical_section": "UB 406x140x39",
-      "steel_grade": "S355",
-      "_source_note": "Standard reference configuration from Rowena drawings, April 2026. Not confirmed to match any specific PE report plate layout. Ds_mm and embedment_mm are from the reference drawing — verify against actual PE submission before use.",
+      "steel_grade": "S275",
+      "_source_note": "Confirmed from P105 T2 drawing D-P105-TNCB-3002, April 2026.",
+      "_concrete_grade": "C28/35 — fck=28 N/mm2 per P105 T2 material schedule. Use for embedment check.",
       "base_plate": {
-        "width_mm": 400,
-        "length_mm": 600,
+        "width_mm": 350,
+        "height_mm": 600,
         "thickness_mm": 25
       },
       "bolts": {
         "diameter_mm": 24,
         "grade": "8.8",
         "n_total": 6,
-        "n_tension": 2,
+        "n_tension": 3,
         "n_shear": 6,
         "embedment_mm": 650,
-        "Ds_mm": 300
+        "_Ds_note": "Ds = plate_height/2 = 600/2 = 300mm. PE simplified base plate method confirmed from P105 T2 drawing D-P105-TNCB-3002. Not bolt-row to bolt-row spacing."
       },
+      "bolt_rows": 2,
+      "bolt_cols": 3,
+      "_layout_note": "3 columns x 2 rows. Bolt template shows 50|125|125|50 horizontally (cols at 50, 175, 300mm) and 50|500|50 vertically (rows at 50mm and 550mm). Confirmed from P105 T2 drawing D-P105-TNCB-3002.",
       "stiffener_plate": {
         "present": true,
         "dimensions_mm": "100x120x8",
         "note": "8mm THK stiffener plate — confirm with PE whether this affects weld or bearing checks"
       },
-      "source": "Image 2 — Section Type 1 Base Plate drawing"
+      "source": "Drawing D-P105-TNCB-3002 — P105 T2 Base Plate"
     }
   ]
 }

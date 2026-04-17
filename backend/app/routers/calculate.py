@@ -16,7 +16,9 @@ from pydantic import BaseModel, Field
 
 from app.calculation.connection import compute_connection
 from app.calculation.foundation import compute_foundation
+from app.calculation.lifting import compute_lifting
 from app.calculation.steel import compute_steel_design
+from app.calculation.subframe import compute_subframe
 from app.calculation.wind import compute_design_pressure
 
 router = APIRouter(prefix="/api", tags=["calculate"])
@@ -55,6 +57,14 @@ class CalculateRequest(BaseModel):
     vertical_load_G_kN: float = Field(
         ..., gt=0,
         description="Permanent vertical load — self-weight of post + footing [kN]."
+    )
+
+    # Concrete
+    fck: float = Field(
+        25.0, gt=0,
+        description="Concrete characteristic cylinder strength fck [N/mm²]. "
+                    "C25/30 → 25, C28/35 → 28, C30/37 → 30. "
+                    "P105 T2 uses fck=28 per material schedule. Default 25."
     )
 
 
@@ -125,6 +135,26 @@ class ConnectionResult(BaseModel):
     all_checks_pass: bool
 
 
+class SubframeResult(BaseModel):
+    section: str
+    fy_N_per_mm2: float
+    w_kN_per_m: float
+    M_Ed_kNm: float
+    Wel_mm3: float
+    Mc_Rd_kNm: float
+    UR_subframe: float
+    pass_: bool = Field(..., alias="pass")
+
+    class Config:
+        populate_by_name = True
+
+
+class LiftingResult(BaseModel):
+    hook: dict
+    hole: dict
+    all_checks_pass: bool
+
+
 class FoundationResult(BaseModel):
     footing_type: str
     inputs: dict
@@ -142,6 +172,8 @@ class CalculateResponse(BaseModel):
     steel: SteelResult
     foundation: FoundationResult
     connection: ConnectionResult | None = None
+    subframe: SubframeResult | None = None
+    lifting: LiftingResult | None = None
 
 
 # ── Endpoint ──────────────────────────────────────────────────────────────────
@@ -152,7 +184,10 @@ def calculate(body: CalculateRequest) -> CalculateResponse:
     Run the full design chain:
     1. Wind pressure (EC1 + SG NA)
     2. Steel post selection from parts library (EC3 LTB + deflection)
-    3. Foundation checks (EC7 DA1-C1, DA1-C2, SLS)
+    3. Connection checks (EC3-1-8 + EC2)
+    4. Subframe check (CHS GI pipe bending)
+    5. Lifting checks (hook tension + bond + web shear)
+    6. Foundation checks (EC7 DA1-C1, DA1-C2, SLS)
 
     P105 T1 validation inputs:
       structure_height=12.7, shelter_factor=0.5, post_spacing=3.0,
@@ -200,7 +235,7 @@ def calculate(body: CalculateRequest) -> CalculateResponse:
                 M_Ed_kNm=steel_raw["M_Ed_kNm"],
                 V_Ed_kN=steel_raw["V_Ed_kN"],
                 section=steel_raw,
-                fck_N_per_mm2=25.0,
+                fck_N_per_mm2=body.fck,
                 external_pressure_kPa=external_pressure_kPa,
                 post_spacing_m=body.post_spacing,
                 barrier_height_m=body.structure_height,
@@ -209,7 +244,32 @@ def calculate(body: CalculateRequest) -> CalculateResponse:
         except Exception as exc:
             raise HTTPException(status_code=422, detail=f"Connection calculation failed: {exc}") from exc
 
-    # ── 4. Foundation ──
+    # ── 4. Subframe ──
+    subframe_result: SubframeResult | None = None
+    try:
+        subframe_raw = compute_subframe(
+            design_pressure_kPa=wind_raw["design_pressure_kPa"],
+            subframe_spacing_m=body.subframe_spacing,
+            post_spacing_m=body.post_spacing,
+        )
+        subframe_result = SubframeResult(**{**subframe_raw, "pass": subframe_raw["pass"]})
+    except Exception as exc:
+        raise HTTPException(status_code=422, detail=f"Subframe calculation failed: {exc}") from exc
+
+    # ── 5. Lifting ──
+    lifting_result: LiftingResult | None = None
+    if not steel_raw.get("error") and steel_raw.get("tw_mm"):
+        try:
+            lifting_raw = compute_lifting(
+                P_G_kN=body.vertical_load_G_kN,
+                section=steel_raw,
+                fck_N_per_mm2=body.fck,
+            )
+            lifting_result = LiftingResult(**lifting_raw)
+        except Exception as exc:
+            raise HTTPException(status_code=422, detail=f"Lifting calculation failed: {exc}") from exc
+
+    # ── 6. Foundation ──
     # Derive SLS forces from steel calculation:
     # H_SLS = w × L (unfactored — divide ULS V_Ed by γQ = 1.5)
     # M_SLS = w × L² / 2 (unfactored — divide ULS M_Ed by γQ = 1.5)
@@ -246,4 +306,6 @@ def calculate(body: CalculateRequest) -> CalculateResponse:
         steel=steel_result,
         foundation=foundation_result,
         connection=connection_result,
+        subframe=subframe_result,
+        lifting=lifting_result,
     )

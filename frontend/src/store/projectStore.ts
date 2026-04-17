@@ -67,6 +67,7 @@ const defaultDesignParameters: DesignParameters = {
   steel_grade: 'S275',
   rebar_grade: 'B500B',
   bolt_grade: '8.8',
+  fck: 25,
   footing_type: null,
   allowable_soil_bearing: 75,
   footing_L_m: null,

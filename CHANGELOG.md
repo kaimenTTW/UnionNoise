@@ -1,5 +1,43 @@
 # CHANGELOG
 
+## [0.10.3] — 2026-04-16
+
+### Fixed
+- `connection_library.json`: T1_M24_6bolt updated with all values confirmed from P105 T2 drawing D-P105-TNCB-3002: plate 350×600×25mm, 3col × 2row bolt layout, n_tension=3, embedment=650mm. `length_mm` renamed to `height_mm` across all configs for consistency.
+- `connection.py`: FT_Rd now uses nominal shank area (π/4 × d²) per confirmed P105 T2 PE methodology. Resolves FT_Rd discrepancy (203 kN → 260.58 kN ✓).
+- `connection.py`: Ds derived as `plate_height_mm / 2` — PE simplified base plate method confirmed from drawing. `Ds_mm` removed from all configs (derived, not stored).
+- `calculate.py` + `Step3.tsx` + `types` + `store`: `fck` field added to request (default 25). P105 T2 uses fck=28 (C28/35) per material schedule. Passed to `compute_connection` and `compute_lifting`. UI field added to Foundation group.
+
+### Validation — P105 T2 connection checks fully validated (D-P105-TNCB-3002)
+- `Ft_per_bolt = 96.53 kN` ✓ (target: 96.53)
+- `FT_Rd = 260.58 kN` ✓ (target: 260.58)
+- `UR_bolt_tension = 0.370` ✓ (target: 0.370)
+- `UR_embedment = 0.678` ✓ (target: 0.678, L_req=440.8 mm < 650 mm provided)
+- All other checks pass: shear UR=0.025, combined UR=0.290, weld UR=0.791, base plate UR=0.009, g_clamp UR=0.552
+- `all_checks_pass = True`
+
+### Notes
+- T1_M20_6bolt and T2_M20_4bolt remain unvalidated against PE report — pending equivalent drawing review
+- Ds = plate_height/2 is PE simplified method. More rigorous approach (bolt row to row spacing) gives larger Ds and lower Ft — simplified method is conservative on the demand side
+- FT_Rd nominal area is a documented PE methodology difference vs EC3-1-8 Table 3.4 (threaded area). Both approaches noted in return dict `FT_Rd_note`
+
+---
+
+## [0.11.0] — 2026-04-16
+
+### Added
+- `backend/app/calculation/subframe.py` — CHS 48.3×2.4mm GI pipe bending check. ULS moment formula M_Ed = (1.5/10) × w × L² (continuous beam /10, confirmed P105). Class 2 section, elastic Wel. UR_subframe = 0.480 at P105 T2 inputs (pass).
+- `backend/app/calculation/lifting.py` — H20 rebar hook tension (EC3-1-8 Cl 3.6.1) + bond length (EC2 Cl 8.4.2) + post web shear at lifting hole. 2 hooks per footing (P105 confirmed). Default embedment 450 mm, hole diameter 35 mm, edge distance 50 mm.
+- Both modules wired into `POST /api/calculate` — `subframe` and `lifting` fields added to `CalculateResponse`. `SubframeResult` and `LiftingResult` Pydantic models added to `calculate.py`.
+
+### Notes
+- Subframe /10 vs /12: /10 confirmed P105. Faber Walk uses /12 (fixed-end assumption). Pending PE confirmation for general use — /10 used here.
+- Lifting hole `edge_distance_mm = 50` assumed standard. Confirm with Rowena actual drilled hole position in post web.
+- Hook embedment default 450 mm matches P105 material schedule. Confirm per project.
+- P105 T2 sample results: hook tension UR=0.199, hook bond UR=0.296, hole shear UR=0.443 — all pass.
+
+---
+
 ## [0.10.2] — 2026-04-16
 
 ### Changed
