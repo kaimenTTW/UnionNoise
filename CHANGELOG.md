@@ -1,5 +1,63 @@
 # CHANGELOG
 
+## [0.11.1] — 2026-04-16
+
+### Fixed
+- `lifting.py`: separated lifting hole and lifting hook load inputs. Added `post_weight_kN: float = 6.0` parameter. Hole shear check now uses `W_post_factored = post_weight_kN × 1.5` (post self-weight only — footing not yet cast when post is lifted via web holes). Hook checks continue to use `P_G_kN` (full assembly weight). Hole shear UR corrected from 1.505 (FAIL) to 0.189 (PASS).
+- `calculate.py` (`CalculateRequest`): added `post_weight_kN: float = Field(6.0, ...)` field. Passed to `compute_lifting()`.
+- `types/index.ts` (`DesignParameters`): added `post_weight_kN: number` field (default 6).
+- `store/projectStore.ts` (`defaultDesignParameters`): added `post_weight_kN: 6`.
+- `Step3.tsx`: added "Post self-weight (kN)" input in Foundation group; hint explains the hole-vs-hook load distinction.
+
+### Validation — P105 T2 lifting hole targets met
+- `W_post_factored = 9.00 kN` (target: 9.00) PASS
+- `V_Rd_hole = 47.63 kN` (target: 47.63) PASS
+- `UR_hole = 0.189` PASS  (was 1.505 FAIL)
+- Hook checks unchanged: `W_factored=286.88` PASS, `F_hook=71.72` PASS, `FT_Rd=176.74` PASS, `L_req=423.8mm` PASS
+
+### Foundation validation (Fix 2 — foundation.py __main__ updated)
+- `foundation.py` `__main__` block replaced with P105 T2 inputs (H_SLS=13.68, M_SLS=86.88, P_G=196.25, B=1.7, L=3.0, D=1.5, φk=30°, γs=19, c'k=5).
+- Sliding and overturning targets matched within 0.5%:
+  - DA1-C1 FOS_sliding = 5.522 (target: 5.52) PASS
+  - DA1-C1 FOS_overturning = 1.152 (target EQU ODF: 1.15) PASS
+  - DA1-C2 FOS_sliding = 4.913 (target: 4.91) PASS
+- Bearing capacity targets do NOT match — flagged in validation output:
+  - DA1-C1 qu: computed 768.78 kPa vs PE 279.44 kPa (MISMATCH +175%)
+  - DA1-C2 qu: computed 406.10 kPa vs PE 127.91 kPa (MISMATCH +217%)
+- Root cause identified by reverse-engineering PE targets:
+  - PE uses SLS eccentricity `e = M_SLS / P_G` (not factored M_Ed) to derive B'
+  - PE omits the overburden surcharge term `q × Nq × sq` from bearing capacity
+  - With these two deviations: DA1-C1 qu = c_d×Nc×sc + 0.5×γ×B'×Ny×sy = 279.5 kPa (matches)
+  - DA1-C2 qu = 4×19.32×sc + 0.5×19×B'×5.75×sy = 127.7 kPa (matches)
+- Code NOT changed to match PE bearing method — PE deviates from EC7 standard bearing formula. Engineering review required before adopting PE approach.
+
+---
+
+## [0.10.4] — 2026-04-18
+
+### Fixed — all values confirmed from P105 T2 calculation report (Han Engineering, 8/6/2023)
+- `connection_library.json`: T1_M24_6bolt `Ds_mm=450` — explicit in PE report page 10 (not plate_height/2 as previously assumed). `weld_length_mm=1360` added — PE page 5 value used directly (formula gives 1045mm, underdetermines). `n_clamps_per_post=5` added — PE page 4 confirmed. `_pe_validation` note added.
+- `connection.py`: bolt tension now uses M_Ed (ULS) directly — PE report uses 130.31 kNm throughout (page 10). M_SLS removed.
+- `connection.py`: `Ds_mm` read from config when present (explicit PE value); falls back to `plate_height/2` for unvalidated configs.
+- `connection.py`: weld length from `config["weld_length_mm"]` when stored; formula fallback for configs without explicit value.
+- `connection.py`: G clamp uses `barrier_height/2` for tributary area (confirmed P105 T2 PE page 4 — barrier panel height, not post length). `n_clamps` read from config with default 5.
+- `subframe.py`: wall thickness corrected to t=2.5mm — matches PE Wely=3.92 cm³ (EN 10219 CHS 48.3×2.5 standard section). Note: PE page 3 description may say "2.2mm" or "2.3mm" but Wely=3.92 cm³ corresponds to t=2.5mm.
+- `subframe.py`: moment resistance formula updated to `Mc = 1.2 × fy × Wel / gamma_M0` — Class 2 section with 1.2 factor per PE methodology (page 3 confirmed).
+- `lifting.py`: `n_hooks` default changed 2→4 (PE page 11 confirmed). `As_hook=490.94mm²` (PE page 11 value — equivalent to H25 gross area despite hook being labelled H20; PE discrepancy flagged in code). `tw_for_hole=6.0mm` (PE page 6 value; section table = 6.4mm).
+
+### Validation — P105 T2 targets met
+- Connection: `Ds=450` ✓, `T_total=289.58 kN` ✓, `Ft=96.53 kN` ✓, `FT_Rd=260.58 kN` ✓, `UR_tension=0.370` ✓, `UR_embedment=0.731` ✓ (fck=25, L_req=475mm), `weld_length=1360mm` ✓, `G clamp F_wind=8.1kN` ✓ (PE: 8.13), `n_clamps=5` ✓ — `all_checks_pass=True`
+- Subframe: `UDL=0.54 kN/m` ✓, `M_Ed=0.73 kNm` ✓, `Wel=3917 mm³` ✓, `Mc=1.88 kNm` ✓, `UR=0.387` ✓
+- Lifting hook: `W_factored=286.88 kN` ✓, `F_hook=71.72 kN` ✓, `FT_Rd=176.74 kN` ✓, `L_req=423.8 mm` ✓
+
+### Notes
+- Lifting hook `As=490.94mm²` is H25 gross area, not H20 (314mm²). PE uses H25 area — flagged in return dict `As_note`. No change to formula pending PE confirmation.
+- Lifting hole shear UR=1.505 (FAIL) — known load model issue: code uses full hook load (71.72 kN) but PE uses post self-weight only (6 kN × 1.5 = 9 kN << V_Rd=47.63 kN). Separate input for post-only weight needed. To be addressed separately.
+- `fck=25` used in PE embedment and lifting bond checks despite C28/35 project concrete — conservative PE choice; `fck` parameter allows engineer to match project spec.
+- G clamp `F_wind` minor rounding: computed 8.10 kN vs PE 8.13 kN — difference is rounding in qp × cp_net.
+
+---
+
 ## [0.10.3] — 2026-04-16
 
 ### Fixed

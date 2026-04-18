@@ -74,6 +74,7 @@ const defaultDesignParameters: DesignParameters = {
   footing_B_m: null,
   footing_D_m: 0,
   vertical_load_G_kN: null,
+  post_weight_kN: 6,
   phi_k: 30,
   gamma_s: 19,
   cohesion_ck: 5,

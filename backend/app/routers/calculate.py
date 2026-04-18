@@ -67,6 +67,14 @@ class CalculateRequest(BaseModel):
                     "P105 T2 uses fck=28 per material schedule. Default 25."
     )
 
+    # Lifting
+    post_weight_kN: float = Field(
+        6.0, gt=0,
+        description="Self-weight of steel post only [kN]. Used for lifting hole shear check. "
+                    "The post is lifted via web holes before the footing is cast; "
+                    "footing weight is not present at that stage."
+    )
+
 
 # ── Response models ───────────────────────────────────────────────────────────
 
@@ -264,6 +272,7 @@ def calculate(body: CalculateRequest) -> CalculateResponse:
                 P_G_kN=body.vertical_load_G_kN,
                 section=steel_raw,
                 fck_N_per_mm2=body.fck,
+                post_weight_kN=body.post_weight_kN,
             )
             lifting_result = LiftingResult(**lifting_raw)
         except Exception as exc:

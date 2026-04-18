@@ -106,6 +106,8 @@ export interface DesignParameters {
   footing_D_m: number | null
   /** Permanent vertical load: post self-weight + footing weight (kN). */
   vertical_load_G_kN: number | null
+  /** Steel post self-weight only (kN). Used for lifting hole shear check (footing not yet cast). */
+  post_weight_kN: number              // default 6
 
   // ── Soil (provisional — user-configurable, not hardcoded) ──
   // PROVISIONAL: pending SME validation — see PRD Section 2.5

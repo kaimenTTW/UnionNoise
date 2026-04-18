@@ -1,7 +1,7 @@
 {
-  "_note": "Standard base plate and anchor bolt configurations per post type. Source: Rowena / Union Noise drawings, April 2026.",
+  "_note": "Standard base plate and anchor bolt configurations per post type. Source: Rowena / Union Noise drawings + P105 T2 calculation report (Han Engineering, 8/6/2023).",
   "_usage": "Connection checks use these as starting configurations. If any UR >= 1.0, upsize to next configuration in the list.",
-  "_ds_derivation": "Ds = base_plate.height_mm / 2 — PE simplified base plate method. Ds is derived in code, not stored.",
+  "_ds_note": "T1_M24_6bolt: Ds=450mm explicit from PE calculation report page 10. Other configs: Ds derived as plate_height_mm/2 (unvalidated).",
 
   "configurations": [
     {
@@ -53,8 +53,9 @@
       "post_type": "Type 1 (larger)",
       "typical_section": "UB 406x140x39",
       "steel_grade": "S275",
-      "_source_note": "Confirmed from P105 T2 drawing D-P105-TNCB-3002, April 2026.",
-      "_concrete_grade": "C28/35 — fck=28 N/mm2 per P105 T2 material schedule. Use for embedment check.",
+      "_source_note": "Confirmed from P105 T2 calculation report (Han Engineering, 8/6/2023) and drawing D-P105-TNCB-3002.",
+      "_concrete_grade": "C28/35 — fck=28 N/mm2 per P105 T2 material schedule. PE embedment check uses fck=25 (conservative).",
+      "_pe_validation": "All values confirmed from P105 T2 calculation report (Han Engineering, 8/6/2023). Ds=450mm explicitly stated on anchor bolt page (page 10). weld_length=1360mm from weld check page (page 5). n_clamps=5 from G clamp page (page 4).",
       "base_plate": {
         "width_mm": 350,
         "height_mm": 600,
@@ -67,17 +68,21 @@
         "n_tension": 3,
         "n_shear": 6,
         "embedment_mm": 650,
-        "_Ds_note": "Ds = plate_height/2 = 600/2 = 300mm. PE simplified base plate method confirmed from P105 T2 drawing D-P105-TNCB-3002. Not bolt-row to bolt-row spacing."
+        "Ds_mm": 450,
+        "_Ds_note": "Ds=450mm explicitly stated in PE calculation report page 10. Not derived from plate geometry."
       },
       "bolt_rows": 2,
       "bolt_cols": 3,
       "_layout_note": "3 columns x 2 rows. Bolt template shows 50|125|125|50 horizontally (cols at 50, 175, 300mm) and 50|500|50 vertically (rows at 50mm and 550mm). Confirmed from P105 T2 drawing D-P105-TNCB-3002.",
+      "weld_length_mm": 1360,
+      "_weld_note": "Weld length 1360mm from PE calculation report page 5. Formula 2b+2(h-2tf) gives 1045mm — underdetermines (likely excludes stiffener plate welds). Config value used directly.",
+      "n_clamps_per_post": 5,
       "stiffener_plate": {
         "present": true,
         "dimensions_mm": "100x120x8",
-        "note": "8mm THK stiffener plate — confirm with PE whether this affects weld or bearing checks"
+        "note": "8mm THK stiffener plate — welds likely included in 1360mm PE weld length"
       },
-      "source": "Drawing D-P105-TNCB-3002 — P105 T2 Base Plate"
+      "source": "Drawing D-P105-TNCB-3002 + P105 T2 calculation report (Han Engineering, 8/6/2023)"
     }
   ]
 }

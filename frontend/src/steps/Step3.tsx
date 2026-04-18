@@ -817,6 +817,7 @@ export default function Step3() {
         footing_W: dp.footing_L_m,   // L (along barrier) → API footing_W
         footing_D: dp.footing_D_m,
         vertical_load_G_kN: dp.vertical_load_G_kN,
+        post_weight_kN: dp.post_weight_kN ?? 6,
       }
       const res = await fetch('/api/calculate', {
         method: 'POST',
@@ -1018,6 +1019,15 @@ export default function Step3() {
                 className="field-input"
                 value={dp.fck ?? 25}
                 onChange={(e) => set({ fck: parseFloat(e.target.value) || 25 })}
+              />
+            </Field>
+
+            <Field label="Post self-weight (kN)" hint="Steel post only — not including footing. Used for lifting hole shear check (footing not yet cast when post is lifted via web holes).">
+              <input
+                type="number" min={0.1} step={0.1}
+                className="field-input"
+                value={dp.post_weight_kN ?? 6}
+                onChange={(e) => set({ post_weight_kN: parseFloat(e.target.value) || 6 })}
               />
             </Field>
 
