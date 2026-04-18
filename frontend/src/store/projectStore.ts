@@ -78,6 +78,7 @@ const defaultDesignParameters: DesignParameters = {
   phi_k: 30,
   gamma_s: 19,
   cohesion_ck: 5,
+  cu_kPa: 0,
 }
 
 const defaultMeta: ProjectMeta = {

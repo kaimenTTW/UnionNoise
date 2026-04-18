@@ -818,6 +818,7 @@ export default function Step3() {
         footing_D: dp.footing_D_m,
         vertical_load_G_kN: dp.vertical_load_G_kN,
         post_weight_kN: dp.post_weight_kN ?? 6,
+        cu_kPa: dp.cu_kPa ?? 0,
       }
       const res = await fetch('/api/calculate', {
         method: 'POST',
@@ -1106,6 +1107,15 @@ export default function Step3() {
                 className="field-input"
                 value={dp.cohesion_ck}
                 onChange={(e) => set({ cohesion_ck: parseFloat(e.target.value) })}
+              />
+            </Field>
+
+            <Field label="Undrained shear strength cu (kPa)" hint="Soft clay only. Leave 0 for sand or gravel. P105 uses 30 kPa. When > 0, both drained and undrained bearing checks run." provisional>
+              <input
+                type="number" min={0} step={5}
+                className="field-input"
+                value={dp.cu_kPa ?? 0}
+                onChange={(e) => set({ cu_kPa: parseFloat(e.target.value) || 0 })}
               />
             </Field>
           </FieldGroup>

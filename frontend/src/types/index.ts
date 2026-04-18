@@ -117,6 +117,8 @@ export interface DesignParameters {
   gamma_s: number                   // default 19
   /** Soil cohesion c'k (kN/m²). P105 confirmed: 5 kN/m². */
   cohesion_ck: number               // default 5
+  /** Undrained shear strength cu (kPa). 0 = drained checks only. P105 T2 uses 30 kPa. */
+  cu_kPa: number                    // default 0
 }
 
 // ─── Calculation results (returned from POST /api/calculate) ─────────────────

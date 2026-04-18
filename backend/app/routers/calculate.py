@@ -67,6 +67,14 @@ class CalculateRequest(BaseModel):
                     "P105 T2 uses fck=28 per material schedule. Default 25."
     )
 
+    # Soil — undrained
+    cu_kPa: float = Field(
+        0.0, ge=0,
+        description="Undrained shear strength cu [kPa]. Soft clay only. "
+                    "When > 0, undrained bearing check (EC7 Annex D.3) runs alongside drained. "
+                    "P105 T2 uses cu=30 kPa. Default 0 = drained checks only."
+    )
+
     # Lifting
     post_weight_kN: float = Field(
         6.0, gt=0,
@@ -300,6 +308,7 @@ def calculate(body: CalculateRequest) -> CalculateResponse:
             phi_k_deg=body.phi_k,
             gamma_s_kN_m3=body.gamma_s,
             c_k_kPa=body.cohesion_ck,
+            cu_kPa=body.cu_kPa,
             allowable_soil_bearing_kPa=body.allowable_soil_bearing,
             footing_B_m=body.footing_B,
             footing_L_m=body.footing_W,

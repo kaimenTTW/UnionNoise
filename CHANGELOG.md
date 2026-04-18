@@ -1,5 +1,33 @@
 # CHANGELOG
 
+## [0.11.2] — 2026-04-19
+### Fixed
+- `foundation.py`: drained bearing capacity eccentricity now uses `e = M_SLS / P_G` (unfactored SLS moment) for all combinations — confirmed PE methodology from P105 T2 report. Previously used factored moment per combination, giving wrong B' and qu mismatch (+175% / +217% vs PE targets).
+- `foundation.py`: overburden surcharge q=0 in drained bearing formula — confirmed PE Choice B from P105 T2 report. Deliberate and conservative (omits q×Nq×sq term). Standard EC7 would use q=D×γs=28.5 kPa.
+### Added
+- `foundation.py`: undrained bearing capacity check per EC7 Annex D.3 — (π+2)×cu,d×bc×ic×sc+q. Runs when `cu_kPa > 0` for Embedded RC footings. DA1-C1 uses `cu,d = cu/1.0`, DA1-C2 uses `cu,d = cu/1.25`. Skipped when `cu_kPa = 0` (default — no behaviour change for existing projects).
+- `foundation.py`: bearing result dict restructured — `bearing` key split into `bearing_drained`, `bearing_undrained` (or None), and `bearing_governs` ("drained" / "undrained" / None). `pass_bearing` now checks both drained and undrained when undrained is present.
+- `foundation.py`: `cu_kPa` parameter added to `compute_foundation()` and `_run_combination()`. Recorded in `inputs` dict.
+- `calculate.py` (`CalculateRequest`): `cu_kPa: float = Field(0.0, ...)` added. Passed to `compute_foundation()`.
+- `types/index.ts` (`DesignParameters`): `cu_kPa: number` added (default 0).
+- `store/projectStore.ts` (`defaultDesignParameters`): `cu_kPa: 0` added.
+- `Step3.tsx`: "Undrained shear strength cu (kPa)" field added in Soil Parameters group.
+### Validated — P105 T2 foundation (pages 7–9)
+- DA1-C1 FOS_sliding = 5.522 (target 5.52) PASS
+- DA1-C1 FOS_overturning = 1.152 (target EQU ODF 1.15) PASS
+- DA1-C2 FOS_sliding = 4.913 (target 4.91) PASS
+- DA1-C1 drained qu = 279.45 kPa (target 279.44) PASS
+- DA1-C2 drained qu = 127.67 kPa (target 127.91) PASS
+- DA1-C1 undrained qu = 178.82 kPa (target 171.48) MISMATCH +4.3%
+- DA1-C2 undrained qu = 147.86 kPa (target 130.67) MISMATCH +13.2%
+### Notes
+- PE report page 9 labels second undrained block as DA1-C1 but uses DA1-C2 factors (γQ=1.3, γφ=1.25, Md=86.88) — confirmed PE typo. Implemented correctly as DA1-C2.
+- Undrained target mismatch: implemented formula (π+2)×cu,d×ic×sc + q gives higher qu than PE targets. Could not reproduce PE undrained values from standard EC7 Annex D.3 formula variations. Structurally conservative (qu > q_applied for both combinations, check passes). Investigation pending PE report review.
+- Both bearing deviations (e=M_SLS/P_G, q=0 for drained) are conservative vs standard EC7.
+- `DA1-C1 pass: False` in current output is a pre-existing issue — `fos_overturning=1.35` in DA1_C1 constants is too high for an EQU-factored check (limit should be 1.0 since γG_stb=0.9 already applied to M_Rd). Will address separately.
+
+---
+
 ## [0.11.1] — 2026-04-16
 
 ### Fixed

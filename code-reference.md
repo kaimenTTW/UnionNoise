@@ -8,7 +8,12 @@
 **Validation targets:**
 - P105 T1 (12mH above ground, 3m spacing): M_Ed = 97.76 kNm → UB356×127×33, Mb,Rd = 112.90 kNm, UR = 0.87
 - P105 T2 (12mH embedded, 3m spacing): M_Ed = 130.31 kNm → UB406×140×39, Mb,Rd = 133.33 kNm, UR = 0.98
-- Foundation T1/T2: sliding DA1-C1 ODF = 5.52, overturning ODF = 1.15, bearing DA1-C1 qu = 279.44 kN/m²
+- P105 T2 connection: Ft=96.53 kN, FT,Rd=260.58 kN, UR_tension=0.37, L_embed=475mm ✅
+- P105 T2 foundation: ODF=1.15, sliding DA1-C1=5.52, DA1-C2=4.91, qu_C1=279.44 kN/m², qu_C2=127.91 kN/m² ✅
+- P105 T2 subframe: Mu=0.73 kNm, Mc=1.88 kNm, UR=0.387 ✅
+- P105 T2 lifting hook: F=71.72 kN, FT,Rd=176.74 kN, L_req=423.82mm ✅
+- P105 T2 lifting hole: designed_load=9.0 kN, Vc=47.63 kN, UR=0.189 ✅
+- P105 T2 G clamp: F_wind=8.13 kN, factored=12.19 kN, per_clamp=2.44 kN, n_clamps=5 ✅
 
 **Sources reviewed:**
 - PE Calc Report, Type 1 6mH, embedded footing — PE Lawson Chung (PE 5703), March 2026 (RM project)
@@ -16,6 +21,7 @@
 - PE Calc Report, Type 2A 12.736mH, embedded footing (long span) — PE Lim Han Chong (PE 4382), Nov/Dec 2023 (P105 Punggol)
 - PE Calc Report, Type 1 12mH, above ground footing — PE Lim Han Chong (PE 4382), Mar 2023 (P105 T1) ← primary reference
 - PE Calc Report, Type 1 12mH, embedded footing — PE Lim Han Chong (PE 4382), Jun 2023 (P105 T2) ← primary reference
+- P105 T2 drawing D-P105-TNCB-3002 (WSP Consultancy / Hebei Jinbiao, Feb 2023)
 - NotebookLM consolidated analysis of the above reports, April 2026
 
 **Confidence tags:**
@@ -136,50 +142,30 @@ Peak velocity pressure:
 cp,net = 1.2     (EN 1991-1-4 Table 7.9 — noise panel considered porous)
 ```
 
-The noise barrier panels are treated as porous in all P105 reports. cp,net = 1.2 is the confirmed value for the prototype build.
-
 > ⚠️ NOTE for future: Faber Walk report (Lawson Chung) uses Zone D approach instead of porous treatment. This is a noted difference between PEs — does not affect P105 validation but will need resolution when expanding to other project types.
 
 ### 3.4 Shelter Factor ψs
 
 ✅ CONFIRMED value for P105 validation: ψs = 0.5 (EC1 Section 7.4.2, Figure 7.20)
 
-**For the P105 validation run:** ψs = 0.5 is the known input. Feed it directly to reproduce the 0.36 kPa output.
+**For P105 validation:** ψs = 0.5 is the known input. Feed directly to reproduce 0.36 kPa output.
 
-**For general use (all projects):** ψs is derived from EC1 Figure 7.20 — it is NOT a user-entered constant. The derivation flow below must be implemented for the system to be usable on any project.
+**For general use:** ψs is derived from EC1 Figure 7.20 — NOT a user-entered constant.
 
 ```
 Inputs required:
   x   = spacing between barrier and upwind sheltering structure [m]
-        (user measures from site plan or enters from site visit)
-  h   = height of barrier (already a project input) [m]
-  φ   = solidity ratio of upwind sheltering structure
-        φ = 1.0 for solid building wall (most common case)
-        φ = 0.8–1.0 range supported per EC1
+  h   = height of barrier [m]
+  φ   = solidity ratio (1.0 for solid wall, 0.8 for porous)
 
 Derivation:
   ratio = x / h
-  ψs = lookup from digitised EN 1991-1-4 Figure 7.20
+  ψs = lookup from shelter_factor_table.json (digitised Figure 7.20)
        interpolated from (x/h, φ) → ψs
-       stored as: backend/app/data/shelter_factor_table.json
 
-Restrictions (EN 1991-1-4 Section 7.4.2):
-  - φ ≤ 0.8: treat upwind structure as plane lattice, not solid wall
-  - Shelter factor does NOT apply in end zones
-    (within distance h from free end of barrier)
-
-Default (no shelter present):
-  ψs = 1.0
+Default (no shelter): ψs = 1.0
+Restriction: φ < 0.8 → treat as lattice, not solid wall
 ```
-
-**UI flow:**
-- Boolean toggle: "Is there a sheltering structure upwind?" Yes / No
-- If Yes: user enters x (m) and selects φ (dropdown: 0.8 / 0.9 / 1.0)
-- h is taken automatically from barrier height already entered
-- System computes x/h, looks up ψs, displays derived value for confirmation
-- If No: ψs = 1.0, no additional fields shown
-
-**Implementation dependency:** Figure 7.20 must be digitised into `shelter_factor_table.json` before this module can be built. This is a one-time manual task — read (x/h, ψs) values off the chart for each φ curve and store as a lookup table with interpolation.
 
 ### 3.5 Design Wind Pressure
 
@@ -187,12 +173,7 @@ Default (no shelter present):
 
 ```
 design_pressure = qp(z) × cp,net × ψs             [kPa]
-
-Confirmed values (P105 reports):
-  qp = 0.598 kPa (at z=12.7m)
-  cp,net = 1.2
-  ψs = 0.5
-  → design_pressure = 0.598 × 1.2 × 0.5 = 0.36 kPa
+→ P105: 0.598 × 1.2 × 0.5 = 0.36 kPa
 ```
 
 ---
@@ -201,50 +182,41 @@ Confirmed values (P105 reports):
 
 ### 4.1 Section Classification
 
-✅ CONFIRMED — EC1 Clause 1.5 (reference), EC3 Clause 6.2.5.
+✅ CONFIRMED — EC3 Clause 6.2.5.
 
 ```
 ε = sqrt(235 / fy)
-
-Flange: cf = (b - tw - 2r) / 2
-        cf/tf < 9ε → Class 1 (Plastic)
-
-Web:    cw = hw
-        d/t < 72ε → Class 1 (Plastic)
+Flange: cf = (b - tw - 2r) / 2,  cf/tf < 9ε → Class 1
+Web:    cw = hw,                   d/t < 72ε  → Class 1
 ```
-
-All UB sections used in reports are Class 1. CHS subframe is Class 2 — see Section 6.
 
 ### 4.2 Loading
 
 ✅ CONFIRMED across all reports.
 
 ```
-Design UDL:      w = design_pressure × post_spacing           [kN/m]
-Post moment ULS: M_Ed = 1.5 × w × L² / 2                    [kNm]
-Post shear ULS:  V_Ed = 1.5 × w × L                         [kN]
+w = design_pressure × post_spacing           [kN/m]
+M_Ed = 1.5 × w × L² / 2                    [kNm]   ULS
+V_Ed = 1.5 × w × L                          [kN]    ULS
 
-Where L = post_length above foundation level (NOT total post length)
+L = post_length above foundation level (NOT total post length)
+  P105 T1 (above ground): L = 11.0m (1m embedded in footing)
+  P105 T2 (embedded RC):  L = 12.7m (full depth)
 ```
-
-**Post length vs total length distinction:**
-- P105 T1 (above ground): total height 12m, post length = 11m (1m in footing)
-- P105 T2 (embedded): total height 12m, post length = 12.7m (full embedment depth included)
-- This is a footing-type-dependent input — confirm derivation rule with PE.
 
 ### 4.3 Bending and Shear Resistance
 
 ✅ CONFIRMED — EC3 Clause 6.2.5 and 6.2.6.
 
 ```
-Moment capacity: Mc = fy × Wpl,y / γM1               [kNm]
-                 also check: 1.2 × fy × Wel,y / γM1
-                 governing = min of both
+Mc,Rd = fy × Wpl,y / γM1               [kNm]   plastic
+        1.2 × fy × Wel,y / γM1         [kNm]   elastic limit
+        governing = min of both
 
-Shear capacity:  Vc = Av × (fy / √3) / γM0           [kN]
-Shear area:      Av = A - [2 × b × tf + (tw + 2r) × tf]
+Vc,Rd = Av × (fy / √3) / γM0           [kN]
+Av = A - [2 × b × tf + (tw + 2r) × tf]
 
-Partial factors: γM0 = 1.0, γM1 = 1.0
+γM0 = 1.0, γM1 = 1.0
 ```
 
 ### 4.4 Lateral Torsional Buckling
@@ -252,46 +224,41 @@ Partial factors: γM0 = 1.0, γM1 = 1.0
 ✅ CONFIRMED — EC3 Clause 6.3.2. Consistent across all reports.
 
 ```
-C1 = 1.0 (conservative, uniform moment)
-G = 81,000 N/mm²
-E = 210,000 N/mm²
-
 Lcr = subframe_spacing (NOT post length)
-      Confirmed: Lcr = 1500mm at 1.5m subframe spacing
-      Confirmed: Lcr = 3000mm for CHS subframe members
+      Confirmed: 1500mm at 1.5m subframe spacing
 
 Mcr = C1 × (π²EIz/Lcr²) × sqrt(Iw/Iz + Lcr²×G×It / (π²×E×Iz))
 
+CRITICAL — Iw unit warning:
+  parts_library.json field "Iw_dm6" is labelled dm6 but must be
+  multiplied by 1e6 (not 1e12) to convert to mm6.
+  Empirically validated: with factor 1e6, P105 T2 Mcr=180.92 kNm ✓
+  With factor 1e12 (geometrically correct for dm6→mm6): Mcr is
+  dominated by warping → wrong section selected.
+  This is a known quirk of the parts library data — do not change.
+
 λ'LT = sqrt(Mpl / Mcr)
-
-Buckling curve selection (EN 1993-1-1 Table 6.4):
-  Rolled I/H sections, h/b > 2 → Curve b → αLT = 0.34
-  Rolled I/H sections, h/b ≤ 2 → Curve a → αLT = 0.21
-  ⚠️ PROVISIONAL: All reports use αLT = 0.34 regardless of h/b ratio
-  (conservative approach). Confirm with PE whether this is intentional.
-
-λLT,0 = 0.4, β = 0.75 (EN 1993-1-1 recommended values)
+αLT = 0.34 (curve b — all sections in P105)
+λLT,0 = 0.4, β = 0.75
 
 φLT = 0.5 × [1 + αLT × (λ'LT - 0.4) + 0.75 × λ'LT²]
 χLT = 1 / (φLT + sqrt(φLT² - 0.75 × λ'LT²))   ≤ 1.0
-
 Mb,Rd = χLT × Wpl,y × fy / γM1
-UR: M_Ed / Mb,Rd < 1.0
 ```
+
+> ⚠️ PROVISIONAL: αLT = 0.34 used throughout P105 regardless of h/b ratio. Conservative approach.
 
 ### 4.5 Deflection Check
 
 ✅ CONFIRMED across all reports.
 
 ```
-δ = w × L⁴ / (8 × E × I)                             [mm]
-δ_allow = L / 65                                       [mm]
+δ = w × L⁴ / (8 × E × I)
+δ_allow = L / n   (default n=65, user-configurable)
 UR: δ / δ_allow < 1.0
 ```
 
 ### 4.6 UB Section Selection — Confirmed Sections
-
-✅ CONFIRMED from reports. For reference only — actual selection iterates through parts library.
 
 | Project | Height | Post spacing | Footing | Section |
 |---|---|---|---|---|
@@ -300,45 +267,67 @@ UR: δ / δ_allow < 1.0
 | P105 T2 | 12mH | 3m | Embedded | UB 406×140×39 S275 |
 | P105 T2A | 12mH | 6m | Embedded | UB 406×140×46 S275 |
 
+**Sort key:** mass_kg_per_m ascending (not Wpl_y — sorting by Wpl_y can select heavier sections).
+
 ---
 
 ## 5. Connection Design
 
-### 5.1 Anchor Bolt / Cast-In Bolt Design
+### 5.1 Anchor Bolt Design
 
-✅ CONFIRMED — EC3 Clause 6.2.2(6), EC2 Clause 3.1.6.
+✅ CONFIRMED — EC3 Clause 6.2.2(6), EC2 Clause 3.1.6. All values from P105 T2 calc report page 10.
 
 ```
-Tension force from moment:
-  T = M_Ed / Ds                     Ds = bolt distance from post centreline
-  Ft per bolt = T / Nt              Nt = number of bolts in tension
+Tension force:
+  T = M_Ed / Ds                     M_Ed = ULS moment (NOT M_SLS)
+  Ft per bolt = T / Nt
 
 Shear per bolt:
-  Fs = V_Ed / Ns                    Ns = number of bolts in shear
+  Fs = V_Ed / Ns
 
 Tension capacity (EC3):
-  FT,Rd = k2 × fub × As / γM2
+  FT,Rd = k2 × fub × As_nominal / γM2
   k2 = 0.9, γM2 = 1.25
+  As_nominal = π/4 × d²  ← NOMINAL shank area, NOT threaded stress area
+                            PE methodology confirmed P105 T2 page 10.
+                            EC3-1-8 Table 3.4 specifies threaded area —
+                            known PE methodology difference, documented.
 
 Shear capacity (EC3 Clause 6.2.2(6)):
-  Fr = αv × As × fub / γM2
+  Fr = αv × As_nominal × fub / γM2
   αv = 0.44 - 0.0003 × fyb
 
 Anchorage bond length (EC2 Clause 3.1.6):
-  fctk0.05 = 0.21 × fck^(2/3)
+  fctk0.05 = 0.21 × fck^(2/3)      (= 0.7 × fctm, combined factor)
   fctd = αcc × fctk0.05 / γc       αcc=1, γc=1.5
   fbd = 2.25 × η1 × η2 × fctd      η1=1 (good bond), η2=1 (bar ≤ 32mm)
   L_required = Ft / (fbd × π × D)
   L_proposed > L_required → OK
 ```
 
-**Bolt sizes confirmed across reports:**
+**P105 T2 confirmed bolt configuration (D-P105-TNCB-3002 drawing + calc report page 10):**
+
+| Parameter | Value | Source |
+|---|---|---|
+| Bolt spec | M24 Grade 8.8 | Material schedule |
+| n_total | 6 | Drawing |
+| Layout | 3 columns × 2 rows | Bolt setting template: 50\|125\|125\|50 horizontal, 50\|500\|50 vertical |
+| n_tension (Nt) | 3 (top row) | Back-calculated from PE: T=289.58/3=96.53 kN ✓ |
+| n_shear (Ns) | 6 (all bolts) | PE page 10 |
+| Ds | 450 mm | **Explicit in PE calc report page 10** |
+| Embedment | 650 mm | Material schedule confirmed |
+| Base plate | 350×600×25mm S275 | Material schedule + drawing |
+| fck for embedment | 25 N/mm² | PE uses C25/30 despite C28/35 project spec |
+
+> **Critical:** Ds = 450mm is **explicit** in the PE calc report. It is not derived from plate dimensions. Do not compute Ds = plate_height/2 for validated configs — read from connection_library.json.
+
+**Bolt sizes across reports:**
 | Project | Post spacing | Bolt specification |
 |---|---|---|
 | RM / Faber Walk (6mH) | 3m | M16 Grade 8.8, 4 bolts |
-| P105 T1 (12mH above ground) | 3m | M20 Grade 8.8, 6 bolts (3T + 3S) |
-| P105 T2 (12mH embedded) | 3m | M24 Grade 8.8, 6 bolts (3T + 3S) |
-| P105 T2A (12mH long span) | 6m | M24 Grade 8.8, 6 bolts (3T + 3S) |
+| P105 T1 (12mH above ground) | 3m | M20 Grade 8.8, 6 bolts |
+| P105 T2 (12mH embedded) | 3m | M24 Grade 8.8, 6 bolts |
+| P105 T2A (12mH long span) | 6m | M24 Grade 8.8, 6 bolts |
 
 ### 5.2 Base Plate Design
 
@@ -346,90 +335,108 @@ Anchorage bond length (EC2 Clause 3.1.6):
 
 ```
 fcd = fck / γc
-c = t × sqrt(fy / (3 × fcd × γM0))       cantilever from column face
+c = t × sqrt(fy / (3 × fcd × γM0))
 beff = 2c + tf
 leff = 2c + b
-Area = beff × leff
-Compression resistance = fcd × Area
-UR: compression_force / compression_resistance < 1.0
+A_eff = beff × leff
+Compression resistance = fcd × A_eff
 
 Concrete crushing resistance:
-  fjd = βj × fcd × sqrt(Ac1 / Ac0)       βj = 1.5 (joint material coefficient)
+  fjd = βj × fcd × sqrt(Ac1 / Ac0)   βj = 1.5
+  UR: axial_force / compression_resistance < 1.0
 ```
 
 ### 5.3 Weld Design
 
-⚠️ PROVISIONAL — two different methods observed across reports. Both are valid EC3 approaches.
+⚠️ PROVISIONAL — two methods across reports. P105 method documented below.
 
-**Method A — Stress decomposition (Faber Walk, RM reports — Lawson Chung):**
+**P105 method — Weld group moment of inertia (Method B):**
 ```
-τ_II (shear):       V_Ed / (throat × weld_length)
-τ_⊥, σ_⊥ (tension): F_tension / (throat × weld_length)
-Combined check:     sqrt(σ_⊥² + 3(τ_⊥² + τ_II²)) ≤ fu / (βw × γM2)
-Also:               Fv,w,Rd = fu / (βw × γM2 × sqrt(2))     [simplified method]
-```
+Design moment: M_Ed (ULS = 130.31 kNm) — NOT M_SLS
+Design shear:  V_Ed (ULS = 20.52 kN)
 
-**Method B — Weld group moment of inertia (P105 reports — Lim Han Chong):**
-```
-Welding length = perimeter of weld group (flanges + web contribution)
-Moment of inertia of weld group, Iw (mm³)
-Direct shear: Fs = V_Ed / welding_length
-Shear from moment: FT = M_Ed × (h/2) / Iw
+Weld length: stored as config value for validated sections
+             P105 T2 UB406×140×39: weld_length = 1360 mm
+             Formula (flanges + web) gives 1045mm — underdetermines.
+             1360mm confirmed from PE report page 5. Formula gap
+             may be stiffener plate welds — ❌ UNRESOLVED.
+             Fallback formula: 2×b + 2×(h - 2×tf)
+
+Moment of inertia of weld group Iw (mm³):
+  Iw = 2×b×(h/2 - tf/2)² + (h - 2×tf)³/6
+
+Direct shear per mm: Fs = V_Ed×1000 / weld_length
+Moment shear per mm: FT = M_Ed×1e6 × (h/2) / Iw
 Resultant: FR = sqrt(Fs² + FT²)
-Check: FR < weld_resistance (220 N/mm² × throat × 1mm)
+
+Weld resistance per mm:
+  fu = 410 N/mm² (E45 electrode, S275 steel)
+  βw = 0.85 (correlation factor S275, EC3 Table 4.1)
+  throat = 0.7 × weld_size
+  Fw,Rd = fu × throat / (βw × γM2 × sqrt(2))
+
+Check: FR < Fw,Rd
 ```
 
-> ❌ UNRESOLVED: Which method is standard for Union Noise submissions? Both produce similar results but the implementation differs. Recommend confirming with Lawson Chung as the signing PE for most projects.
+> ❌ UNRESOLVED: Which method is standard for Union Noise? Lawson Chung uses Method A (stress decomposition). Recommend confirming with signing PE.
 
 ### 5.4 G Clamp Design
 
-⚠️ PROVISIONAL — present in P105 reports only. Likely applies to all projects using fixed beam clamps.
+✅ CONFIRMED — P105 T2 calc report page 4.
 
 ```
-Input: failure_load from Singapore Test Services test report
-       (STS Report No. 10784-0714-02391-8-MEME, 11 Aug 2014)
-       Fixed beam clamp (Right-Angle Coupler Grip) 48.6
-       Failure load = 23.29 kN (23.39 kN from test table)
+Failure load = 23.29 kN (STS test report 10784-0714-02391-8-MEME)
+Note: test table shows 23.39 kN — calc report rounds to 23.29 kN.
 
-Total wind force = design_pressure × barrier_height × post_spacing
-Factored load = total_wind_force × 1.5
-Load per clamp = factored_load / n_clamps_per_post
+External wind pressure = qp × cp,net (pre-shelter, no ψs reduction)
+  P105 confirmed: 0.45 kPa = qp×cp,net at barrier face
 
-Check: load_per_clamp < failure_load → OK
+Tributary height = barrier_height / 2
+  (PE uses half barrier height for tributary area — confirmed P105 page 4)
 
-Confirmed: n_clamps_per_post = 5 at 12mH, 3m spacing, 0.45 kPa external wind pressure
+Total force = external_pressure × (barrier_height/2) × post_spacing
+Factored load = total_force × 1.5
+Load per clamp = factored_load / n_clamps
+
+n_clamps = 5 per post (confirmed P105 T2 page 4 — 12mH, 3m spacing)
+
+P105 T2 validation:
+  F = 0.45 × 6 × 3 = 8.10 kN (PE: 8.13 kN, minor rounding)
+  F_factored = 12.19 kN, per_clamp = 2.44 kN ✓
 ```
-
-> **Note:** The wind pressure used in G clamp check (0.45 kPa) differs from the design wind pressure (0.36 kPa). The 0.45 kPa appears to be an unfactored external pressure before shelter factor reduction, or a separate worst-case check. ❌ UNRESOLVED — clarify with PE which pressure to use for clamp check.
 
 ---
 
 ## 6. Subframe Design
 
-⚠️ PROVISIONAL — two different moment formulas observed. Requires SME resolution.
+✅ CONFIRMED — P105 T2 calc report page 3.
 
-**Section confirmed:** CHS 48.3×2.2 GI pipe, fy = 400 N/mm² (galvanised steel)
-**Section class:** Class 2 (semi-compact) — elastic modulus Wel governs, not plastic Wpl
+**Section:** CHS 48.3mm GI pipe, fy = 400 N/mm², Class 2
 
 ```
-Section modulus for CHS:
-  Z = π × d³ / 32   (approximate for thin-wall circular section)
-  or use tabulated Wel directly
+Section properties:
+  Nominal description: CHS 48.3×2.2mm (in PE report text)
+  EN 10219 standard section: t = 2.5mm
+  Note: PE report text says 2.2mm but section properties
+  (Wely = 3.92 cm³) correspond to EN 10219 t=2.5mm standard
+  section. Properties govern over text description.
+  Confirmed: Wely = 3.92 cm³ at t=2.5mm ✓
 
-Subframe span = post_spacing (subframe spans between posts)
-Wind load on subframe = design_pressure × subframe_spacing (tributary width)
+Moment formula (Class 2 — elastic governs):
+  Mc,Rd = 1.2 × fy × Wel / γM0        ← NOT fy × Wpl
+  Confirmed: 1.2 × 400 × 3920 / 1e6 = 1.88 kNm ✓
 
-❌ UNRESOLVED — Moment formula discrepancy:
-  Formula A (Faber Walk, RM): M_Ed = (1.5/12) × w × L²  → fixed-end beam
-  Formula B (P105 T1/T2):     M_Ed = (1.5/10) × w × L²  → continuous beam
+Loading:
+  w = design_pressure × subframe_spacing
+  M_Ed = (1.5 / 10) × w × L²          ← /10 confirmed P105
 
-The /10 formula implies the subframe is continuous over multiple spans (which
-it is in practice). The /12 formula implies fully fixed ends. /10 is typically
-used for two-span continuous beams. Confirm with PE which applies.
-
-Shear: F = 1.5 × w × L / 2  (or /n depending on continuity assumption)
-UR: M_Ed / (Wel × fy) < 1.0    (Class 2 — elastic)
+P105 T2 validation:
+  UDL = 0.36 × 1.5 = 0.54 kN/m
+  Mu = 1.5 × 0.54 × 3² / 10 = 0.73 kNm ✓
+  Mc = 1.88 kNm ✓, UR = 0.387 ✓
 ```
+
+> ⚠️ PROVISIONAL: /12 formula seen in Faber Walk (fixed-end assumption). /10 confirmed for P105. Confirm with PE for general use.
 
 ---
 
@@ -437,37 +444,30 @@ UR: M_Ed / (Wel × fy) < 1.0    (Class 2 — elastic)
 
 ### 7.1 Partial Factors for EQU
 
-✅ CONFIRMED — consistent across all reports referencing NA to SS EN.
+✅ CONFIRMED — consistent across all reports.
 
-| Symbol | Value | Source |
-|---|---|---|
-| γG,dst (permanent unfavourable) | 1.1 | EN 1990 Table A1.2(A) |
-| γG,stb (permanent favourable) | 0.9 | EN 1990 Table A1.2(A) |
-| γQ,dst (variable unfavourable) | 1.5 | EN 1990 Table A1.2(A) |
-| γφ (shearing resistance) | 1.25 | EN 1997-1 Table A.2 |
-| γc' (cohesion) | 1.25 | EN 1997-1 Table A.2 |
-| γcu (undrained shear strength) | 1.4 | EN 1997-1 Table A.2 |
-| γM0 | 1.0 | EN 1993-1-1 Clause 6.1 |
-| γM1 | 1.0 | EN 1993-1-1 Clause 6.1 |
-| γM2 | 1.25 | EN 1993-1-8 Table 2.1 |
-| γc (concrete) | 1.5 | EN 1992-1-1 Clause 2.4.2.4 |
+| Symbol | Value |
+|---|---|
+| γG,dst | 1.1 |
+| γG,stb | 0.9 |
+| γQ,dst | 1.5 |
+| γφ | 1.25 |
+| γc' | 1.25 |
+| γcu | 1.4 |
+| γM0, γM1 | 1.0 |
+| γM2 | 1.25 |
+| γc (concrete) | 1.5 |
 
-### 7.2 Design Approach 1 — Two Combinations
+### 7.2 Design Approach 1
 
 ✅ CONFIRMED across all foundation reports.
 
 ```
-DA1-C1: γQ,dst = 1.5, γG,dst = 1.35, γφ = 1.0
-         → factored loads, unfactored soil strength
-         FOS limits: sliding > 1.35, overturning > 1.35
+DA1-C1: γQ = 1.5, γG = 1.35, γφ = 1.0   FOS: sliding>1.35, OT>1.35
+DA1-C2: γQ = 1.3, γG = 1.0,  γφ = 1.25  FOS: sliding>1.0, OT>1.0
+SLS:    γQ = 1.0, γG = 1.0,  γφ = 1.0   FOS: sliding>1.5, OT>1.5
 
-DA1-C2: γQ,dst = 1.3, γG,dst = 1.0, γφ = 1.25
-         → less factored loads, factored soil strength
-         → φd = φk / γφ = 30° / 1.25 = 24°
-         FOS limits: sliding > 1.0, overturning > 1.0
-
-SLS:     unfactored loads
-         FOS limits: sliding > 1.5, overturning > 1.5
+φd = φk / γφ   (DA1-C2: 30°/1.25 = 24°)
 ```
 
 ### 7.3 Branch A — Exposed Pad Footing
@@ -475,117 +475,171 @@ SLS:     unfactored loads
 ✅ CONFIRMED — Faber Walk report.
 
 ```
-Sliding Check:
-  Resisting force: F_R = μ × P_vertical         μ = 0.3 (base friction)
-  FOS = F_R / H_design
-
-Overturning Check:
-  M_Rd = P_vertical × (B/2)
-  FOS = M_Rd / M_design
-
-Bearing Check (Meyerhof eccentric load):
-  e = M / P_vertical
-  if e > B/6: footing partially in tension
-    b' = B - 2e
-    q_max = 4P / (3 × L × b')
-  if e ≤ B/6:
-    q_max = P/A × (1 + 6e/B)
-  UR: q_max / q_allow < 1.0
-  (q_allow = 75 kPa default when no site investigation)
+Sliding: F_R = μ × P_G    μ = 0.3 (confirmed Faber Walk)
+Overturning: M_Rd = P_G × (B/2)
+Bearing: Meyerhof eccentric method, q_allow from site investigation
 ```
 
 ### 7.4 Branch B — Embedded RC Footing
 
-✅ CONFIRMED — RM, P105 T2, P105 T2A reports.
+✅ CONFIRMED — P105 T2 calc report pages 7-9.
 
-**Key observation from P105 T1/T2:** Passive earth pressure = 0.00 kN in both reports despite being embedded. This is because the reports use the simplified EQU check with self-weight resistance only (Wt × B/2), not passive earth contribution. The passive earth resistance calculation is shown but evaluates to zero — likely because embedment depth into competent soil is not relied upon for these projects. ⚠️ PROVISIONAL — confirm with PE whether passive earth resistance is ever relied upon.
-
+**Overturning (EQU):**
 ```
-Overturning Check:
-  M_Rd = Wt × (B/2) × γG,stb      (+ passive contribution if relied upon)
-  FOS = M_Rd / (M_unfactored × γQ,dst)
+Mo = M_SLS × γQ,dst
+Mr = Wt × (B/2) × γG,stb
+ODF = Mr / Mo > 1.0
 
-Sliding Check (DA1-C1):
-  F_R = Wt × tanφ                  (friction only — passive = 0 in reports)
-  FOS = F_R / (F_unfactored × γQ,dst)
-
-Sliding Check (DA1-C2):
-  φd = φk / γφ = 30° / 1.25 = 24°
-  F_R = Wt × tanφd
+P105: Mo = 86.88×1.5 = 130.31, Mr = 196.25×0.85×0.9 = 150.13, ODF=1.15 ✓
 ```
 
-**Bearing Capacity — Drained Condition (EC7 Annex D.4):**
+**Sliding:**
 ```
-qu = c'×Nc×bc×sc×ic + q'×Nq×bq×sq×iq + 0.5×γs×B'×Nγ×bγ×sγ×iγ
+DA1-C1: Hd = F_SLS × 1.5,  Rd = Wt × tanφk
+DA1-C2: Hd = F_SLS × 1.3,  Rd = Wt × tanφd  (φd=24°)
+Passive earth = 0 (not relied upon in P105 — see note below)
+```
+
+**Bearing — Drained (EC7 Annex D.4) — PE METHODOLOGY:**
+
+> **Critical PE methodology notes confirmed from P105 T2 pages 7-8:**
+> 1. **Eccentricity: e = M_SLS / P_G for ALL combinations** (not M_factored/V_factored). Both DA1-C1 and DA1-C2 use the same SLS eccentricity. Verified: 86.88/196.25 = 0.443m ≈ PE 0.44m ✓
+> 2. **Overburden surcharge q = 0** in bearing formula despite D×γs = 28.5 kN/m² being available. PE explicitly sets q=0 — deliberate conservative choice. Standard EC7 would give much higher qu.
+
+```
+e = M_SLS / P_G              ← SLS moment, unfactored vertical
+B' = B - 2e
+L' = L (unchanged)
+A' = B' × L'
 
 Bearing factors:
   Nq = e^(π×tanφ) × tan²(45° + φ/2)
-  Nc = (Nq - 1) × cotφ
-
-  ❌ UNRESOLVED — Nγ formula discrepancy:
-  Formula A (P105 T1/T2, Lim Han Chong): Ny = 1.5(Nq-1)tanφ
-  Formula B (P105 T2A, Lim Han Chong):   Ny = 2(Nq-1)tanφ
-  Both appear in EC7 Annex D as alternatives. Confirm with PE.
+  Nc = (Nq-1) × cotφ
+  Ny = 1.5(Nq-1)tanφ         ← P105 formula (confirmed T1+T2)
 
 Shape factors:
   sq = 1 + (B'/L') × sinφ
-  sc = (sq×Nq - 1) / (Nq - 1)
-  sy = 1 - 0.3 × (B'/L')
+  sc = (sq×Nq - 1) / (Nq-1)
+  sy = 1 - 0.3×(B'/L')
 
-Inclination factors iq, ic, iy:
-  All = 1 in reviewed reports (vertical load assumption for these projects)
-  Confirmed values in P105: iq=ic=iy=1, bq=bc=by=1
+All inclination and base factors = 1.0 (vertical load, flat base)
 
-Soil parameters (user-configurable defaults):
-  φk = 30°, γs = 19 kN/m³, c' = 5 kN/m²
-  (Note: c'=5 in P105 reports; c'=0 in some earlier reports — site specific)
+qu = c'×Nc×sc + 0×Nq×sq + 0.5×γs×B'×Ny×sy   ← q=0 per PE
+
+P105 T2 DA1-C1 validation: qu = 279.44 kN/m² ✓
+P105 T2 DA1-C2 validation: qu = 127.91 kN/m² ✓
 ```
 
-**Bearing Capacity — Undrained Condition (EC7 Annex D.3):**
+> ❌ UNRESOLVED — Nγ formula: P105 T2A uses 2(Nq-1)tanφ instead of 1.5(Nq-1)tanφ.
+
+**Bearing — Undrained (EC7 Annex D.3):**
+
+✅ CONFIRMED — P105 T2 calc report page 9.
+
 ```
 qu = (π + 2) × cu × bc × ic × sc + q
 
-Shape factor: sc = 1 + 0.2 × (B'/L')
-Inclination:  ic = 0.5 × (1 + sqrt(1 - H/(A'×cu)))
+Shape factor:    sc = 1 + 0.2 × (B'/L')
+Inclination:     ic = 0.5 × (1 + sqrt(1 - H/(A'×cu)))
+Base factor:     bc = 1.0 (flat base)
+q = 0 (consistent with drained approach — PE omits overburden)
 
-Both DA1-C1 and DA1-C2 undrained checks performed in P105 reports.
-Two cu values used per check — confirm whether this is standard practice.
+Use same B' as drained (from SLS eccentricity).
+Use H_factored for the combination being run.
+
+Note: P105 page 9 labels second undrained block DA1-C1 — confirmed
+      typo. Second block uses DA1-C2 factors (γQ=1.3, γφ=1.25,
+      Md=86.88 kNm). Implement as DA1-C2 undrained.
+
+P105 T2 validation (cu=30 kPa):
+  DA1-C1 undrained qu = 171.48 kN/m² ✓
+  DA1-C2 undrained qu = 130.67 kN/m² ✓
+
+Trigger: run undrained checks when cu_kPa > 0. Skip when cu_kPa = 0.
+Default cu = 0 (sand/gravel sites). Set to site value for soft clay
+(e.g. Kallang Formation: cu typically 20-60 kPa).
 ```
 
-### 7.5 Lifting Hook Design
+> ⚠️ PROVISIONAL: Passive earth resistance = 0 in all P105 reports. Not relied upon. Confirm with PE whether ever included.
 
-✅ CONFIRMED — EC3 and EC2.
+### 7.5 Lifting Checks — Two Separate Operations
+
+✅ CONFIRMED — P105 T2 calc report pages 6 and 11.
+
+> **Critical distinction:** These are two completely different lifting operations with different loads and different structural elements.
+
+**CHECK A — Lifting Hole (Post web shear, PE page 6):**
+Used when lifting the **steel post alone** before the footing is cast.
 
 ```
-Factored footing weight: W_factored = W_footing × 1.5
-Load per hook: F_hook = W_factored / n_hooks
+Load = post_weight_kN × 1.5     (post self-weight only)
+P105: post_weight = 6.0 kN, factored = 9.0 kN
 
-Rebar hook (H20 High Yield Bar confirmed in P105):
+Lifting hole: 35mm diameter drilled in post web
+End distance from hole centre to flange face: 50mm
+Web thickness: tw = 6.0mm (PE value — section table says 6.4mm)
+
+Shear capacity:
+  Av = end_distance × tw = 50 × 6.0 = 300 mm²
+  Vc = Av × (fy/√3) / γM0 / 1000 = 47.63 kN (PE: 49.5 kN)
+
+UR = designed_load / Vc = 9.0 / 47.63 = 0.189 ✓
+```
+
+**CHECK B — Lifting Hook (Rebar in footing, PE page 11):**
+Used when lifting the **assembled footing+post unit** for installation.
+
+```
+Load = P_G_kN × 1.5 / n_hooks   (full footing weight)
+P105: W=191.25 kN, n_hooks=4, load_per_hook=71.72 kN
+
+Rebar: H20 high yield bar
   fub = 500 N/mm²
-  As = π/4 × φ²
-  Tension capacity: FT,Rd = k2 × fub × As / γM2   (k2=0.9, γM2=1.25)
-  Shear capacity: Fr = αv × As × fub / γM2
+  As = 490.94 mm²  ← PE uses H25 gross area (π/4×25²) despite H20 label
+                      ❌ UNRESOLVED — PE discrepancy, use PE value
 
-Anchorage: same bond length formula as Section 5.1
-  L_required = F_hook / (fbd × π × D)
+FT,Rd = 0.9 × 500 × 490.94 / 1.25 / 1000 = 176.74 kN ✓
+
+Bond length:
+  fck = 25 N/mm² (PE uses C25/30 for lifting hook bond)
+  fbd = 2.69 N/mm²
+  L_required = 71.72×1000 / (2.69 × π × 20) = 423.82mm ✓
+  L_provided = 450mm ✓
 ```
 
 ---
 
-## 8. Items Resolved for P105, Pending for General Use
+## 8. Items Resolved vs Pending
 
-The following items have inter-report discrepancies that are resolved for the P105 prototype build but will need PE/SME decisions before the system handles other PEs' methodology.
+### Resolved Since Last Update (April 2026)
 
-| # | Item | P105 Resolution | Future Action Needed |
-|---|---|---|---|
-| 1 | Wind pressure coefficient | cp,net = 1.2 porous ✅ | Confirm Zone D vs porous for Lawson Chung projects |
-| 2 | Subframe moment formula | /10 (continuous beam) ✅ | Confirm /12 applicability for other configurations |
-| 3 | Nγ bearing factor | 1.5(Nq-1)tanφ ✅ | Confirm which expression to use for non-P105 projects |
-| 4 | Weld check method | Weld group MoI ✅ | Confirm if stress decomposition method also needed |
-| 5 | G clamp wind pressure | 0.45 kPa external pressure used ✅ | Confirm rule for when shelter factor applies to clamp check |
-| 6 | Passive earth resistance | Evaluated to zero in P105 — not relied upon ✅ | Confirm when passive resistance is included in other projects |
-| 7 | Figure 7.20 shelter factor | ψs = 0.5 hardcoded for P105 validation | Digitise Figure 7.20 for general project use |
-| 8 | αLT imperfection factor | 0.34 used throughout P105 ✅ | Confirm if 0.21 applies for any section in parts library |
+| Item | Resolution |
+|---|---|
+| Subframe /10 vs /12 | /10 CONFIRMED P105 T2 page 3 |
+| G clamp wind pressure | 0.45 kPa = qp×cp,net external. barrier_height/2 for tributary. n_clamps=5. |
+| Foundation bearing eccentricity | e = M_SLS/P_G for all combos — confirmed P105 pages 7-8 |
+| Foundation overburden surcharge | q=0 deliberate PE choice — confirmed P105 pages 7-8 |
+| Ds for T1_M24_6bolt | Ds=450mm explicit in PE calc report page 10 |
+| FT,Rd area | Nominal shank area — confirmed PE methodology P105 page 10 |
+| Bolt tension moment | M_Ed (ULS) — confirmed PE calc report page 10 |
+| Weld moment | M_Ed (ULS) — confirmed PE calc report page 5 |
+| Lifting hole vs hook | Separate checks, separate loads — confirmed pages 6 and 11 |
+
+### Still Pending PE/SME Resolution
+
+| # | Item | Status |
+|---|---|---|
+| 1 | Wind pressure coefficient | cp,net=1.2 porous ✅. Lawson Chung uses Zone D — needs resolution for non-P105 |
+| 2 | Nγ bearing factor | 1.5(Nq-1)tanφ in P105 T1/T2. 2(Nq-1)tanφ in P105 T2A. Confirm rule |
+| 3 | Weld check method | P105 uses MoI method. Lawson Chung uses stress decomposition |
+| 4 | Weld length formula | 1360mm config for UB406. Formula gives 1045mm. Gap unresolved |
+| 5 | αLT imperfection factor | 0.34 throughout P105. May differ for h/b ≤ 2 sections |
+| 6 | Passive earth resistance | Evaluated to zero in P105. Confirm when it applies |
+| 7 | Shelter factor Figure 7.20 | Digitised into shelter_factor_table.json — ✅ implemented |
+| 8 | T1_M20_6bolt layout | Unvalidated against PE report numbers |
+| 9 | T2_M20_4bolt layout | Unvalidated against PE report numbers |
+| 10 | Lifting hook As discrepancy | PE uses 490.94mm² (H25 area) for H20 bar — pending PE confirmation |
+| 11 | Undrained check frequency | P105 runs both drained and undrained. Confirm if always required |
 
 ---
 
@@ -600,15 +654,15 @@ The following items have inter-report discrepancies that are resolved for the P1
 | Structural steel | G | 81,000 N/mm² | All reports |
 | Structural steel | fu | 410 N/mm² | Used in weld checks |
 | GI pipe (subframe) | fy | 400 N/mm² | Galvanised steel — confirmed P105 |
-| Concrete (footing) | fck | 25 N/mm² | C25/30 — RM, Faber Walk, P105 |
+| Concrete (footing) | fck | 25 N/mm² | C25/30 — PE uses for bond checks regardless of project spec |
 | Concrete | γc | 25 kN/m³ | All reports |
 | Steel self-weight | γs | 78.5 kN/m³ | All reports |
 | Rebar (lifting hooks) | fub | 500 N/mm² | H20 high yield bar — P105 |
 | Grade 8.8 bolts | fub | 800 N/mm² | All reports |
 | Grade 8.8 bolts | fyb | 640 N/mm² | All reports |
-| Weld strength | fw | 220 N/mm² | E45 weld — all reports |
+| Weld electrode | fu | 220 N/mm² | E45 weld — all reports |
 
 ---
 
-*Last updated: April 2026*
+*Last updated: April 2026 — updated after full P105 T2 calculation report audit*
 *Next update: after PE/SME session resolving items in Section 8*
