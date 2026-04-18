@@ -98,7 +98,7 @@ LTB: dict = {
 }
 
 # DA1 partial factors — ✅ CONFIRMED. code-reference.md Section 7.2.
-DA1_C1: dict = {"gamma_Q": 1.5, "gamma_G_fav": 1.35, "gamma_phi": 1.0, "fos_sliding": 1.35, "fos_overturning": 1.35}
+DA1_C1: dict = {"gamma_Q": 1.5, "gamma_G_fav": 1.35, "gamma_phi": 1.0, "fos_sliding": 1.35, "fos_overturning": 1.0}
 DA1_C2: dict = {"gamma_Q": 1.3, "gamma_G_fav": 1.0,  "gamma_phi": 1.25, "fos_sliding": 1.0,  "fos_overturning": 1.0}
 DA1_SLS: dict = {"gamma_Q": 1.0, "gamma_G_fav": 1.0,  "gamma_phi": 1.0,  "fos_sliding": 1.5,  "fos_overturning": 1.5}
 

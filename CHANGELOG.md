@@ -1,5 +1,13 @@
 # CHANGELOG
 
+## [0.11.3] — 2026-04-19
+### Fixed
+- `constants.py`: `DA1_C1 fos_overturning` corrected 1.35 → 1.0. The EQU overturning check applies `gamma_G_stb=0.9` to the stabilising moment before computing ODF; once that factor is in, the threshold is ODF ≥ 1.0. Setting 1.35 was double-counting the partial factor. Confirmed from P105 T2 page 7: ODF=1.15 is explicitly marked OK → now PASS.
+### Notes
+- Undrained ic mismatch (qu computed higher than PE targets: 178.82 vs 171.48 for C1, 147.86 vs 130.67 for C2) is a formula interpretation difference — PE ic values cannot be reproduced from standard EC7 Annex D.3 formula. Both combinations still pass structurally (qu > q_applied). Flagged for PE clarification at next Union Noise meeting.
+
+---
+
 ## [0.11.2] — 2026-04-19
 ### Fixed
 - `foundation.py`: drained bearing capacity eccentricity now uses `e = M_SLS / P_G` (unfactored SLS moment) for all combinations — confirmed PE methodology from P105 T2 report. Previously used factored moment per combination, giving wrong B' and qu mismatch (+175% / +217% vs PE targets).
