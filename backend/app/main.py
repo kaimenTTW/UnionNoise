@@ -3,10 +3,13 @@ Union Noise — FastAPI backend entry point.
 All LLM calls use LiteLLM so the provider is swappable via env vars.
 """
 
+from dotenv import load_dotenv
+load_dotenv()
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.routers import calculate, extract
+from app.routers import calculate, extract, select_section
 
 app = FastAPI(
     title="Union Noise API",
@@ -30,6 +33,7 @@ app.add_middleware(
 
 app.include_router(extract.router)
 app.include_router(calculate.router)
+app.include_router(select_section.router)
 
 
 @app.get("/health")

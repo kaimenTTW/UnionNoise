@@ -165,6 +165,8 @@ export interface SteelCalcResult {
   Lcr_mm?: number
   post_length_m?: number
   deflection_limit_n?: number
+  selection_source?: string | null
+  fallback_reason?: string | null
   pass: boolean
   error?: string
 }
@@ -182,15 +184,15 @@ export interface FoundationComboResult {
   FOS_overturning: number
   pass_overturning: boolean
   fos_limit_overturning: number
-  bearing: {
+  bearing_drained: {
     UR_bearing?: number | null
     // Exposed pad fields
     e_m?: number
-    b_prime_m?: number        // effective width after eccentricity (added v0.8.0)
+    b_prime_m?: number
     q_max_kPa?: number
     q_allow_kPa?: number
     // Embedded RC fields
-    B_prime_m?: number        // effective width from EC7 Annex D (capital B convention)
+    B_prime_m?: number
     qu_kPa?: number
     q_applied_kPa?: number
     phi_d_deg?: number
@@ -201,8 +203,101 @@ export interface FoundationComboResult {
     sc?: number
     sy?: number
   }
+  bearing_undrained?: {
+    sc?: number
+    ic?: number
+    bc?: number
+    qu_kPa?: number
+    q_applied_kPa?: number
+    UR_bearing?: number | null
+  } | null
+  bearing_governs?: 'drained' | 'undrained' | null
   pass_bearing: boolean
   pass: boolean
+}
+
+export interface ConnectionCalcResult {
+  config_id?: string
+  bolt_tension?: {
+    M_Ed_kNm?: number
+    Ds_mm?: number
+    T_total_kN?: number
+    n_tension?: number
+    Ft_per_bolt_kN?: number
+    fub_N_per_mm2?: number
+    As_mm2?: number
+    FT_Rd_kN?: number
+    UR?: number
+    pass?: boolean
+  }
+  bolt_shear?: {
+    Fv_per_bolt_kN?: number
+    Fv_Rd_kN?: number
+    UR?: number
+    pass?: boolean
+  }
+  bolt_combined?: { UR?: number; pass?: boolean }
+  bolt_embedment?: {
+    fbd_N_per_mm2?: number
+    L_required_mm?: number
+    L_provided_mm?: number
+    UR?: number
+    pass?: boolean
+  }
+  weld?: {
+    weld_length_mm?: number
+    FR_N_per_mm?: number
+    Fw_Rd_N_per_mm?: number
+    UR?: number
+    pass?: boolean
+  }
+  base_plate?: {
+    compression_resistance_kN?: number
+    UR?: number
+    pass?: boolean
+  }
+  g_clamp?: {
+    F_per_clamp_kN?: number
+    failure_load_kN?: number
+    n_clamps?: number
+    UR?: number
+    pass?: boolean
+  }
+  all_checks_pass?: boolean
+}
+
+export interface SubframeCalcResult {
+  section?: string
+  w_kN_per_m?: number
+  M_Ed_kNm?: number
+  Mc_Rd_kNm?: number
+  UR_subframe?: number
+  pass?: boolean
+}
+
+export interface LiftingCalcResult {
+  hook?: {
+    n_hooks?: number
+    W_factored_kN?: number
+    F_hook_kN?: number
+    FT_Rd_kN?: number
+    UR_tension?: number
+    fbd_N_per_mm2?: number
+    L_required_mm?: number
+    L_provided_mm?: number
+    UR_bond?: number
+    pass_tension?: boolean
+    pass_bond?: boolean
+  }
+  hole?: {
+    post_weight_kN?: number
+    W_post_factored_kN?: number
+    Av_mm2?: number
+    V_Rd_kN?: number          // backend key: V_Rd_kN
+    UR_shear?: number          // backend key: UR_shear
+    pass_shear?: boolean
+  }
+  all_checks_pass?: boolean
 }
 
 export interface CalculationResults {
@@ -215,6 +310,9 @@ export interface CalculationResults {
     DA1_C2: FoundationComboResult
     pass: boolean
   }
+  connection?: ConnectionCalcResult | null
+  subframe?: SubframeCalcResult | null
+  lifting?: LiftingCalcResult | null
 }
 
 // ─── ProjectContext slices ────────────────────────────────────────────────────

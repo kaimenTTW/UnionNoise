@@ -4,9 +4,12 @@ import { useStepGuard } from '../hooks/useStepGuard'
 import { useProjectStore } from '../store/projectStore'
 import type {
   CalculationResults,
+  ConnectionCalcResult,
   DesignParameters,
   FootingType,
+  LiftingCalcResult,
   OverridableValue,
+  SubframeCalcResult,
 } from '../types'
 
 // ─── Shelter factor lookup — EN 1991-1-4 Figure 7.20 ─────────────────────────
@@ -349,6 +352,14 @@ function buildSteelRows(steel: CalculationResults['steel']): DerivationRow[] {
   if (!steel.pass || steel.error || !steel.designation) return []
   const rows: DerivationRow[] = []
 
+  // Section source provenance — top of derivation
+  if (steel.selection_source != null) {
+    rows.push({ label: 'Section source', result: steel.selection_source })
+  }
+  if (steel.fallback_reason != null) {
+    rows.push({ label: 'Fallback reason', result: steel.fallback_reason })
+  }
+
   if (steel.w_kN_per_m != null) {
     rows.push({ label: 'Design UDL', expr: `w = q_design × post_spacing`, result: `${steel.w_kN_per_m.toFixed(3)} kN/m` })
   }
@@ -435,29 +446,105 @@ function buildFoundationRows(foundation: CalculationResults['foundation']): Deri
     },
   )
 
-  const br = c1.bearing
-  if (foundation.footing_type === 'Exposed pad' && br.q_max_kPa != null && br.q_allow_kPa != null) {
+  const br = c1.bearing_drained
+  if (foundation.footing_type === 'Exposed pad' && br?.q_max_kPa != null && br?.q_allow_kPa != null) {
     if (br.e_m != null) {
-      rows.push({ label: 'Eccentricity', expr: `e = M / P_G`, result: `${br.e_m.toFixed(3)} m` })
+      rows.push({ label: 'Eccentricity', expr: `e = M_SLS / P_G`, result: `${br.e_m.toFixed(3)} m` })
     }
     rows.push(
       { label: 'Max bearing pressure', expr: `q_max = P/A × (1 + 6e/B)`, result: `${br.q_max_kPa.toFixed(2)} kPa` },
       { label: 'Allowable bearing', expr: `q_allow (user input)`, result: `${br.q_allow_kPa.toFixed(2)} kPa` },
     )
-  } else if (foundation.footing_type === 'Embedded RC' && br.qu_kPa != null && br.q_applied_kPa != null) {
+  } else if (foundation.footing_type === 'Embedded RC' && br?.qu_kPa != null && br?.q_applied_kPa != null) {
     if (br.Nq != null) {
-      rows.push({ label: 'Bearing factors', expr: `Nq=${br.Nq?.toFixed(2)}  Nc=${br.Nc?.toFixed(2)}  Nγ=${br.Ny?.toFixed(2)}`, result: '', clause: 'EC7 Ann. D.4' })
+      rows.push({ label: 'Bearing factors (drained)', expr: `Nq=${br.Nq?.toFixed(2)}  Nc=${br.Nc?.toFixed(2)}  Nγ=${br.Ny?.toFixed(2)}`, result: '', clause: 'EC7 Ann. D.4' })
     }
     rows.push(
-      { label: 'Bearing capacity qu', expr: `c'Nc·sc + q·Nq·sq + ½γB'Nγ·sγ`, result: `${br.qu_kPa.toFixed(2)} kPa`, clause: 'EC7 Ann. D.4' },
+      { label: 'Bearing capacity qu (drained)', expr: `c'Nc·sc + q·Nq·sq + ½γB'Nγ·sγ`, result: `${br.qu_kPa.toFixed(2)} kPa`, clause: 'EC7 Ann. D.4' },
       { label: 'Applied bearing', expr: `q = P_G / (B' × L)`, result: `${br.q_applied_kPa.toFixed(2)} kPa` },
     )
   }
 
-  if (br.UR_bearing != null) {
-    rows.push({ label: 'Bearing UR', expr: `q_applied / q_capacity`, result: `${br.UR_bearing.toFixed(3)} ${c1.pass_bearing ? '< 1.0 ✓' : '≥ 1.0 ✗'}` })
+  if (br?.UR_bearing != null) {
+    rows.push({ label: 'Bearing UR (drained)', expr: `q_applied / qu`, result: `${br.UR_bearing.toFixed(3)} ${c1.pass_bearing ? '< 1.0 ✓' : '≥ 1.0 ✗'}` })
   }
 
+  const bru = c1.bearing_undrained
+  if (bru?.qu_kPa != null && bru?.q_applied_kPa != null) {
+    rows.push(
+      { label: 'qu (undrained)', expr: `(π+2)×cu,d×bc×ic×sc + q`, result: `${bru.qu_kPa.toFixed(2)} kPa`, clause: 'EC7 Ann. D.3' },
+      { label: 'Applied bearing', expr: `q = P_G / (B' × L)`, result: `${bru.q_applied_kPa.toFixed(2)} kPa` },
+    )
+    if (bru.UR_bearing != null) {
+      rows.push({ label: 'Bearing UR (undrained)', expr: `q_applied / qu`, result: `${bru.UR_bearing.toFixed(3)}` })
+    }
+  }
+
+  if (c1.bearing_governs) {
+    rows.push({ label: 'Governing check', result: c1.bearing_governs })
+  }
+
+  return rows
+}
+
+function buildConnectionRows(conn: ConnectionCalcResult): DerivationRow[] {
+  const rows: DerivationRow[] = []
+  const bt = conn.bolt_tension
+  if (bt) {
+    if (bt.M_Ed_kNm != null) rows.push({ label: 'M_Ed (ULS)', expr: 'from steel module', result: `${bt.M_Ed_kNm.toFixed(2)} kNm`, clause: 'EC3' })
+    if (bt.Ds_mm != null) rows.push({ label: 'Lever arm Ds', expr: 'from connection config', result: `${bt.Ds_mm} mm` })
+    if (bt.T_total_kN != null) rows.push({ label: 'T_total', expr: `M_Ed×1000 / Ds`, result: `${bt.T_total_kN.toFixed(2)} kN` })
+    if (bt.Ft_per_bolt_kN != null && bt.n_tension != null) rows.push({ label: 'Ft per bolt', expr: `T_total / ${bt.n_tension} tension bolts`, result: `${bt.Ft_per_bolt_kN.toFixed(2)} kN` })
+    if (bt.FT_Rd_kN != null) rows.push({ label: 'FT,Rd', expr: `0.9 × fub × As / γM2`, result: `${bt.FT_Rd_kN.toFixed(2)} kN`, clause: 'EC3-1-8 Cl 3.6.1' })
+    if (bt.UR != null) rows.push({ label: 'UR bolt tension', expr: `Ft / FT,Rd`, result: `${bt.UR.toFixed(3)} ${bt.pass ? '< 1.0 ✓' : '≥ 1.0 ✗'}` })
+  }
+  const be = conn.bolt_embedment
+  if (be) {
+    if (be.fbd_N_per_mm2 != null) rows.push({ label: 'fbd', expr: `2.25×η1×η2×fctd`, result: `${be.fbd_N_per_mm2.toFixed(3)} N/mm²`, clause: 'EC2 Cl 8.4.2' })
+    if (be.L_required_mm != null && be.L_provided_mm != null) rows.push({ label: 'Embedment length', expr: `Ft / (fbd×π×d)`, result: `${be.L_required_mm.toFixed(1)} mm req'd / ${be.L_provided_mm} mm prov'd` })
+  }
+  const w = conn.weld
+  if (w) {
+    if (w.weld_length_mm != null) rows.push({ label: 'Weld length', expr: 'from config', result: `${w.weld_length_mm} mm` })
+    if (w.FR_N_per_mm != null && w.Fw_Rd_N_per_mm != null) rows.push({ label: 'Weld demand / capacity', expr: `FR / Fw,Rd`, result: `${w.FR_N_per_mm.toFixed(3)} / ${w.Fw_Rd_N_per_mm.toFixed(3)} N/mm` })
+  }
+  const gc = conn.g_clamp
+  if (gc) {
+    if (gc.F_per_clamp_kN != null) rows.push({ label: 'G clamp load', expr: `p×h/2×spacing / n_clamps`, result: `${gc.F_per_clamp_kN.toFixed(2)} kN` })
+    if (gc.failure_load_kN != null) rows.push({ label: 'G clamp failure load', expr: 'STS test-based', result: `${gc.failure_load_kN.toFixed(2)} kN` })
+  }
+  return rows
+}
+
+function buildSubframeRows(sf: SubframeCalcResult): DerivationRow[] {
+  const rows: DerivationRow[] = []
+  if (sf.w_kN_per_m != null) rows.push({ label: 'UDL w', expr: `q_design × subframe_spacing`, result: `${sf.w_kN_per_m.toFixed(3)} kN/m` })
+  if (sf.M_Ed_kNm != null) rows.push({ label: 'M_Ed', expr: `1.5 × w × L² / 10`, result: `${sf.M_Ed_kNm.toFixed(2)} kNm`, clause: 'EC3 /10 (P105)' })
+  if (sf.Mc_Rd_kNm != null) rows.push({ label: 'Mc,Rd', expr: `1.2 × fy × Wel / γM0`, result: `${sf.Mc_Rd_kNm.toFixed(2)} kNm`, clause: 'EC3 Class 2' })
+  if (sf.UR_subframe != null) rows.push({ label: 'UR subframe', expr: `M_Ed / Mc,Rd`, result: `${sf.UR_subframe.toFixed(3)} ${(sf.pass ?? false) ? '< 1.0 ✓' : '≥ 1.0 ✗'}` })
+  return rows
+}
+
+function buildLiftingRows(lift: LiftingCalcResult): DerivationRow[] {
+  const rows: DerivationRow[] = []
+  const hole = lift.hole
+  if (hole) {
+    if (hole.post_weight_kN != null) rows.push({ label: 'Post self-weight', expr: 'user input', result: `${hole.post_weight_kN.toFixed(1)} kN` })
+    if (hole.W_post_factored_kN != null) rows.push({ label: 'Factored hole load', expr: `post_weight × 1.5`, result: `${hole.W_post_factored_kN.toFixed(2)} kN` })
+    if (hole.Av_mm2 != null) rows.push({ label: 'Shear area Av', expr: `web area at hole`, result: `${hole.Av_mm2.toFixed(1)} mm²` })
+    if (hole.V_Rd_kN != null) rows.push({ label: 'V_Rd hole', expr: `Av × fy/√3 / γM0`, result: `${hole.V_Rd_kN.toFixed(2)} kN`, clause: 'EC3 Cl 6.2.6' })
+    if (hole.UR_shear != null) rows.push({ label: 'UR hole shear', expr: `load / V_Rd`, result: `${hole.UR_shear.toFixed(3)} ${(hole.pass_shear ?? false) ? '< 1.0 ✓' : '≥ 1.0 ✗'}` })
+  }
+  const hook = lift.hook
+  if (hook) {
+    if (hook.W_factored_kN != null) rows.push({ label: 'Factored hook load', expr: `P_G × 1.5`, result: `${hook.W_factored_kN.toFixed(2)} kN` })
+    if (hook.F_hook_kN != null && hook.n_hooks != null) rows.push({ label: 'Load per hook', expr: `W_factored / ${hook.n_hooks} hooks`, result: `${hook.F_hook_kN.toFixed(2)} kN` })
+    if (hook.FT_Rd_kN != null) rows.push({ label: 'FT,Rd (hook rebar)', expr: `0.9 × fub × As / γM2`, result: `${hook.FT_Rd_kN.toFixed(2)} kN`, clause: 'EC3-1-8 Cl 3.6.1' })
+    if (hook.UR_tension != null) rows.push({ label: 'UR hook tension', expr: `F_hook / FT,Rd`, result: `${hook.UR_tension.toFixed(3)} ${(hook.pass_tension ?? false) ? '< 1.0 ✓' : '≥ 1.0 ✗'}` })
+    if (hook.fbd_N_per_mm2 != null) rows.push({ label: 'fbd', expr: `2.25×fctd`, result: `${hook.fbd_N_per_mm2.toFixed(3)} N/mm²`, clause: 'EC2 Cl 8.4.2' })
+    if (hook.L_required_mm != null && hook.L_provided_mm != null) rows.push({ label: 'Bond length', expr: `F_hook / (fbd×π×d)`, result: `${hook.L_required_mm.toFixed(1)} mm req'd / ${hook.L_provided_mm} mm prov'd` })
+    if (hook.UR_bond != null) rows.push({ label: 'UR bond', expr: `L_req / L_prov`, result: `${hook.UR_bond.toFixed(3)} ${(hook.pass_bond ?? false) ? '< 1.0 ✓' : '≥ 1.0 ✗'}` })
+  }
   return rows
 }
 
@@ -623,6 +710,8 @@ function FoundationPanel({ foundation }: { foundation: CalculationResults['found
     { key: 'DA1-C2', data: foundation.DA1_C2 },
   ] as const
 
+  const hasUndrained = combos.some((c) => c.data.bearing_undrained != null)
+
   return (
     <div className="panel space-y-3">
       <div className="flex items-center justify-between">
@@ -636,7 +725,9 @@ function FoundationPanel({ foundation }: { foundation: CalculationResults['found
               <th className="text-left py-1 pr-4 font-medium">Combo</th>
               <th className="text-left py-1 pr-4 font-medium">Sliding FOS</th>
               <th className="text-left py-1 pr-4 font-medium">Overturning FOS</th>
-              <th className="text-left py-1 font-medium">Bearing UR</th>
+              <th className="text-left py-1 pr-4 font-medium">Bearing UR (dr.)</th>
+              {hasUndrained && <th className="text-left py-1 pr-4 font-medium">Bearing UR (undr.)</th>}
+              {hasUndrained && <th className="text-left py-1 pr-4 font-medium">Governs</th>}
               <th className="text-left py-1 pl-2 font-medium">Pass</th>
             </tr>
           </thead>
@@ -645,26 +736,32 @@ function FoundationPanel({ foundation }: { foundation: CalculationResults['found
               <tr key={key} className="border-b border-border/50">
                 <td className="py-1.5 pr-4 font-mono font-semibold">{key}</td>
                 <td className="py-1.5 pr-4 font-mono">
-                  <FosCell
-                    value={data.FOS_sliding}
-                    limit={data.fos_limit_sliding}
-                    pass={data.pass_sliding}
-                  />
+                  <FosCell value={data.FOS_sliding} limit={data.fos_limit_sliding} pass={data.pass_sliding} />
                 </td>
                 <td className="py-1.5 pr-4 font-mono">
-                  <FosCell
-                    value={data.FOS_overturning}
-                    limit={data.fos_limit_overturning}
-                    pass={data.pass_overturning}
-                  />
+                  <FosCell value={data.FOS_overturning} limit={data.fos_limit_overturning} pass={data.pass_overturning} />
                 </td>
-                <td className="py-1.5 font-mono">
-                  {data.bearing.UR_bearing != null ? (
-                    <UrCell value={data.bearing.UR_bearing} pass={data.pass_bearing} />
+                <td className="py-1.5 pr-4 font-mono">
+                  {data.bearing_drained?.UR_bearing != null ? (
+                    <UrCell value={data.bearing_drained.UR_bearing} pass={data.pass_bearing} />
                   ) : (
                     <span className="text-muted">—</span>
                   )}
                 </td>
+                {hasUndrained && (
+                  <td className="py-1.5 pr-4 font-mono">
+                    {data.bearing_undrained?.UR_bearing != null ? (
+                      <UrCell value={data.bearing_undrained.UR_bearing} pass={data.pass_bearing} />
+                    ) : (
+                      <span className="text-muted">—</span>
+                    )}
+                  </td>
+                )}
+                {hasUndrained && (
+                  <td className="py-1.5 pr-4 font-sans text-muted">
+                    {data.bearing_governs ?? '—'}
+                  </td>
+                )}
                 <td className="py-1.5 pl-2">
                   <PassBadge pass={data.pass} />
                 </td>
@@ -678,12 +775,174 @@ function FoundationPanel({ foundation }: { foundation: CalculationResults['found
   )
 }
 
+function ConnectionPanel({ conn }: { conn: ConnectionCalcResult }) {
+  const checks = [
+    { label: 'Bolt tension',       demand: conn.bolt_tension?.Ft_per_bolt_kN != null ? `${conn.bolt_tension.Ft_per_bolt_kN.toFixed(2)} kN` : '—', capacity: conn.bolt_tension?.FT_Rd_kN != null ? `${conn.bolt_tension.FT_Rd_kN.toFixed(2)} kN` : '—', ur: conn.bolt_tension?.UR, pass: conn.bolt_tension?.pass ?? false },
+    { label: 'Bolt shear',         demand: conn.bolt_shear?.Fv_per_bolt_kN != null ? `${conn.bolt_shear.Fv_per_bolt_kN.toFixed(2)} kN` : '—', capacity: conn.bolt_shear?.Fv_Rd_kN != null ? `${conn.bolt_shear.Fv_Rd_kN.toFixed(2)} kN` : '—', ur: conn.bolt_shear?.UR, pass: conn.bolt_shear?.pass ?? false },
+    { label: 'Bolt combined',      demand: '—', capacity: '—', ur: conn.bolt_combined?.UR, pass: conn.bolt_combined?.pass ?? false },
+    { label: 'Bolt embedment',     demand: conn.bolt_embedment?.L_required_mm != null ? `${conn.bolt_embedment.L_required_mm.toFixed(0)} mm` : '—', capacity: conn.bolt_embedment?.L_provided_mm != null ? `${conn.bolt_embedment.L_provided_mm} mm` : '—', ur: conn.bolt_embedment?.UR, pass: conn.bolt_embedment?.pass ?? false },
+    { label: 'Weld',               demand: conn.weld?.FR_N_per_mm != null ? `${conn.weld.FR_N_per_mm.toFixed(3)} N/mm` : '—', capacity: conn.weld?.Fw_Rd_N_per_mm != null ? `${conn.weld.Fw_Rd_N_per_mm.toFixed(3)} N/mm` : '—', ur: conn.weld?.UR, pass: conn.weld?.pass ?? false },
+    { label: 'Base plate',         demand: '—', capacity: conn.base_plate?.compression_resistance_kN != null ? `${conn.base_plate.compression_resistance_kN.toFixed(1)} kN` : '—', ur: conn.base_plate?.UR, pass: conn.base_plate?.pass ?? false },
+    { label: 'G clamp',            demand: conn.g_clamp?.F_per_clamp_kN != null ? `${conn.g_clamp.F_per_clamp_kN.toFixed(2)} kN` : '—', capacity: conn.g_clamp?.failure_load_kN != null ? `${conn.g_clamp.failure_load_kN.toFixed(2)} kN` : '—', ur: conn.g_clamp?.UR, pass: conn.g_clamp?.pass ?? false },
+  ]
+  return (
+    <div className="panel space-y-3">
+      <div className="flex items-center justify-between">
+        <p className="text-xs font-semibold uppercase tracking-widest text-muted">Connection Design</p>
+        <PassBadge pass={conn.all_checks_pass ?? false} />
+      </div>
+      <div className="overflow-x-auto">
+        <table className="w-full text-xs">
+          <thead>
+            <tr className="border-b border-border text-muted">
+              <th className="text-left py-1 pr-3 font-medium">Check</th>
+              <th className="text-left py-1 pr-3 font-medium">Demand</th>
+              <th className="text-left py-1 pr-3 font-medium">Capacity</th>
+              <th className="text-left py-1 pr-3 font-medium">UR</th>
+              <th className="text-left py-1 font-medium">Pass</th>
+            </tr>
+          </thead>
+          <tbody>
+            {checks.map((c) => (
+              <tr key={c.label} className="border-b border-border/50">
+                <td className="py-1.5 pr-3 font-sans">{c.label}</td>
+                <td className="py-1.5 pr-3 font-mono text-muted">{c.demand}</td>
+                <td className="py-1.5 pr-3 font-mono text-muted">{c.capacity}</td>
+                <td className="py-1.5 pr-3 font-mono">
+                  {c.ur != null ? <UrCell value={c.ur} pass={c.pass} /> : <span className="text-muted">—</span>}
+                </td>
+                <td className="py-1.5"><PassBadge pass={c.pass} /></td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      <DerivationPanel rows={buildConnectionRows(conn)} />
+    </div>
+  )
+}
+
+function SubframePanel({ sf }: { sf: SubframeCalcResult }) {
+  return (
+    <div className="panel space-y-3">
+      <div className="flex items-center justify-between">
+        <p className="text-xs font-semibold uppercase tracking-widest text-muted">Horizontal Subframe</p>
+        <PassBadge pass={sf.pass ?? false} />
+      </div>
+      <div className="grid grid-cols-4 gap-3 text-sm">
+        <div>
+          <p className="text-muted text-xs">Section</p>
+          <p className="font-mono">{sf.section ?? '—'}</p>
+        </div>
+        <div>
+          <p className="text-muted text-xs">M_Ed</p>
+          <p className="font-mono">{sf.M_Ed_kNm != null ? `${sf.M_Ed_kNm.toFixed(2)} kNm` : '—'}</p>
+        </div>
+        <div>
+          <p className="text-muted text-xs">Mc,Rd</p>
+          <p className="font-mono">{sf.Mc_Rd_kNm != null ? `${sf.Mc_Rd_kNm.toFixed(2)} kNm` : '—'}</p>
+        </div>
+        <div>
+          <p className="text-muted text-xs">UR</p>
+          <p className="font-mono">
+            {sf.UR_subframe != null
+              ? <UrCell value={sf.UR_subframe} pass={sf.UR_subframe < 1.0} />
+              : '—'}
+          </p>
+        </div>
+      </div>
+      <DerivationPanel rows={buildSubframeRows(sf)} />
+    </div>
+  )
+}
+
+function LiftingPanel({ lift }: { lift: LiftingCalcResult }) {
+  const hole = lift.hole
+  const hook = lift.hook
+  return (
+    <div className="panel space-y-3">
+      <div className="flex items-center justify-between">
+        <p className="text-xs font-semibold uppercase tracking-widest text-muted">Lifting</p>
+        <PassBadge pass={lift.all_checks_pass ?? false} />
+      </div>
+
+      {hole && (
+        <div>
+          <p className="text-xs text-muted mb-1.5">Lifting hole — post web shear</p>
+          <div className="grid grid-cols-3 gap-3 text-sm">
+            <div>
+              <p className="text-muted text-xs">Factored load</p>
+              <p className="font-mono">{hole.W_post_factored_kN != null ? `${hole.W_post_factored_kN.toFixed(1)} kN` : '—'}</p>
+            </div>
+            <div>
+              <p className="text-muted text-xs">V_Rd hole</p>
+              <p className="font-mono">{hole.V_Rd_kN != null ? `${hole.V_Rd_kN.toFixed(1)} kN` : '—'}</p>
+            </div>
+            <div>
+              <p className="text-muted text-xs">UR</p>
+              <p className="font-mono">
+                {hole.UR_shear != null
+                  ? <UrCell value={hole.UR_shear} pass={hole.pass_shear ?? false} />
+                  : '—'}
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {hook && (
+        <div className="border-t border-border/30 pt-3">
+          <p className="text-xs text-muted mb-1.5">Lifting hooks — footing rebar</p>
+          <div className="grid grid-cols-3 gap-3 text-sm">
+            <div>
+              <p className="text-muted text-xs">Load per hook</p>
+              <p className="font-mono">{hook.F_hook_kN != null ? `${hook.F_hook_kN.toFixed(2)} kN` : '—'}</p>
+            </div>
+            <div>
+              <p className="text-muted text-xs">FT,Rd</p>
+              <p className="font-mono">{hook.FT_Rd_kN != null ? `${hook.FT_Rd_kN.toFixed(2)} kN` : '—'}</p>
+            </div>
+            <div>
+              <p className="text-muted text-xs">UR tension</p>
+              <p className="font-mono">
+                {hook.UR_tension != null
+                  ? <UrCell value={hook.UR_tension} pass={hook.pass_tension ?? false} />
+                  : '—'}
+              </p>
+            </div>
+            <div>
+              <p className="text-muted text-xs">Bond L_req</p>
+              <p className="font-mono">{hook.L_required_mm != null ? `${hook.L_required_mm.toFixed(1)} mm` : '—'}</p>
+            </div>
+            <div>
+              <p className="text-muted text-xs">Bond L_prov</p>
+              <p className="font-mono">{hook.L_provided_mm != null ? `${hook.L_provided_mm} mm` : '—'}</p>
+            </div>
+            <div>
+              <p className="text-muted text-xs">UR bond</p>
+              <p className="font-mono">
+                {hook.UR_bond != null
+                  ? <UrCell value={hook.UR_bond} pass={hook.pass_bond ?? false} />
+                  : '—'}
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
+      <DerivationPanel rows={buildLiftingRows(lift)} />
+    </div>
+  )
+}
+
 function OverallBanner({ results }: { results: CalculationResults }) {
   const steelPass = results.steel.pass
   const foundationPass = results.foundation.pass
-  const allPass = steelPass && foundationPass
+  const connPass = results.connection?.all_checks_pass ?? true
+  const sfPass = results.subframe?.pass ?? true
+  const liftPass = results.lifting?.all_checks_pass ?? true
+  const allPass = steelPass && foundationPass && connPass && sfPass && liftPass
 
-  const failCount = [steelPass, foundationPass].filter((p) => !p).length
+  const failCount = [steelPass, foundationPass, connPass, sfPass, liftPass].filter((p) => !p).length
 
   return (
     <div
@@ -1153,6 +1412,15 @@ export default function Step3() {
               />
               <SteelPanel steel={calculation_results.steel} />
               <FoundationPanel foundation={calculation_results.foundation} />
+              {calculation_results.connection && (
+                <ConnectionPanel conn={calculation_results.connection} />
+              )}
+              {calculation_results.subframe && (
+                <SubframePanel sf={calculation_results.subframe} />
+              )}
+              {calculation_results.lifting && (
+                <LiftingPanel lift={calculation_results.lifting} />
+              )}
               <OverallBanner results={calculation_results} />
             </div>
           )}

@@ -1,5 +1,99 @@
 # CHANGELOG
 
+## [0.12.5] — 2026-04-20
+### Fixed
+- `section_retrieval.py`: replaced async `_fetch_page()` with a thread-based implementation that runs Playwright inside `_playwright_fetch_sync()` — a dedicated worker thread gets a fresh `asyncio.new_event_loop()` (always a SelectorEventLoop), bypassing uvicorn's ProactorEventLoop on Windows entirely. The outer `_fetch_page()` remains async and offloads to the thread via `loop.run_in_executor()`.
+### Notes
+- `run.py` and the `WindowsSelectorEventLoopPolicy` workaround are no longer needed for Playwright to work. Server can be started with `uv run uvicorn app.main:app --reload` as normal.
+
+---
+
+## [0.12.4] — 2026-04-20
+### Fixed
+- `run.py` (new): `asyncio.WindowsSelectorEventLoopPolicy()` is now set before uvicorn initialises its own event loop. Setting the policy inside `main.py` was too late — uvicorn creates the loop before the FastAPI app code runs, so Playwright's subprocess transport still raised `NotImplementedError` on Windows.
+- `main.py`: removed the now-redundant `sys`/`asyncio` policy block.
+### Changed
+- Server must now be started with `uv run python run.py` instead of `uv run uvicorn app.main:app --reload`. Behaviour (host, port, reload) is identical.
+
+---
+
+## [0.12.3] — 2026-04-20
+### Fixed
+- `main.py`: added `asyncio.WindowsSelectorEventLoopPolicy()` before all other imports on Windows. Python 3.8+ defaults to ProactorEventLoop which does not support Playwright's subprocess transport — Playwright calls would raise `NotImplementedError` at runtime without this fix.
+### Notes
+- M_Ed formula (`1.5 * w * L² / 2`) is correct in both `calculate.py` and `select_section.py` routers. If M_Ed=260.64 kNm is observed (2× expected), verify Swagger UI inputs: `post_length` must be 12.7 m (not 25.4 m). The formula itself is not the cause.
+
+---
+
+## [0.12.2] — 2026-04-20
+### Fixed
+- `select_section.py`: `SelectSectionResponse` was missing `fallback_reason` field — now included so Swagger UI and API consumers can see why cache fallback activated.
+### Added
+- `section_retrieval.py`: stage-by-stage stdout logging — logs attempt, URL fetch + char count, Gemini call, section count returned, selected section or fallback reason, and cache fallback. All printed with `flush=True` so they appear immediately in uvicorn terminal.
+- `section_retrieval.py`: startup warning at module import if `GOOGLE_API_KEY` is not set: `"WARNING: GOOGLE_API_KEY not set — section retrieval will use cache fallback only"`.
+### Notes
+- M_Ed and V_Ed are computed in `select_section.py` router before the service call and flow through `_check_section()` — they will be non-zero as long as `design_pressure_kPa > 0`. Validated: P105 T2 inputs (dp=0.36, spacing=3.0, post_length=12.7) → M_Ed=130.31 kNm.
+
+---
+
+## [0.12.1] — 2026-04-20
+### Changed
+- `section_retrieval.py`: replaced `httpx` with Playwright headless Chromium for catalogue fetching — pages are now fully JS-rendered before HTML is passed to Gemini. `_fetch_page()` now uses `async_playwright`, `wait_until="networkidle"` + 2 s extra wait.
+- `section_retrieval.py`: `_CATALOGUE_URL` changed from Tata Steel Europe to `https://consteel.com.sg/`.
+- `pyproject.toml`: `httpx` dependency removed (no longer used).
+### Added
+- Explicit `PlaywrightTimeoutError` handler: sets `fallback_reason = "Live retrieval timed out — using cached sections"` and activates cache fallback gracefully.
+### Notes
+- Playwright 1.58.0 + Chromium 145.0.7632.6 must be installed (`playwright install chromium`). Already done in dev environment.
+
+---
+
+## [0.13.3] — 2026-04-20
+### Changed
+- `calculate.py`: `POST /api/calculate` now calls `select_section()` (Gemini 2.0 Flash → Continental Steel live retrieval) instead of `compute_steel_design()` directly. Fallback to `parts_library.json` is preserved on any failure. `selection_source` ("live"/"cache") and `fallback_reason` added to `SteelResult` response.
+- `calculate.py`: endpoint converted from `def` to `async def` to support `await select_section(...)`.
+- `section_retrieval.py`: `fallback_reason` now captured and returned in all code paths — `RuntimeError` (e.g. `GOOGLE_API_KEY not set`), network/LLM exceptions, and "no live candidate passed". Previously swallowed silently.
+- `types/index.ts`: `selection_source?` and `fallback_reason?` optional fields added to `SteelCalcResult`.
+- `Step3.tsx`: Steel derivation panel prepends "Section source" and "Fallback reason" rows (only shown when present in API response).
+### Notes
+- `compute_steel_design()` unchanged — still available as a standalone function and used in `steel.py __main__` validation.
+- `GOOGLE_API_KEY` must be set in `backend/.env` for live retrieval. Without it, `fallback_reason` = "GOOGLE_API_KEY not set" and cache path runs immediately.
+- If the supplier page is JS-rendered or unreachable, the exception is caught, `fallback_reason` records the error type, and the cache fallback activates silently.
+
+---
+
+## [0.13.0] — 2026-04-20
+### Added
+- `Step3.tsx`: Connection results panel — 7-check table (bolt tension, bolt shear, bolt combined, bolt embedment, weld, base plate, G clamp) with demand / capacity / UR / pass per row. Overall pass/fail badge.
+- `Step3.tsx`: Subframe results row — section, M_Ed, Mc,Rd, UR.
+- `Step3.tsx`: Lifting results panel — hole shear sub-section and hook tension/bond sub-section, each with factored load, capacity, and UR.
+- `Step3.tsx`: DerivationPanel rows added for connection (T_total, Ft, FT,Rd, fbd, L_req, weld, G clamp), subframe (UDL, M_Ed, Mc,Rd, UR), and lifting (hole: factored load, V_Rd, UR; hook: W_factored, F_hook, FT,Rd, fbd, L_req, UR_bond).
+- `types/index.ts`: `ConnectionCalcResult`, `SubframeCalcResult`, `LiftingCalcResult` interfaces added. `connection?`, `subframe?`, `lifting?` optional fields added to `CalculationResults`.
+### Fixed
+- `Step3.tsx`: Foundation bearing table updated to show drained UR and (when cu_kPa > 0) undrained UR + governing-check columns. Columns only appear when undrained data is present — no layout change for drained-only projects.
+- `Step3.tsx`: Overall pass/fail banner now includes connection, subframe, and lifting — previously only wind + steel + foundation.
+### Notes
+- All new result panels are conditionally rendered — if backend returns null for any module, that panel is hidden gracefully.
+- Derivation rows use actual API response values, not hardcoded samples.
+- `LiftingCalcResult.hole` uses backend keys `V_Rd_kN` and `UR_shear` (not `V_Rd_hole_kN`/`UR_hole_shear`).
+
+---
+
+## [0.12.0] — 2026-04-20
+### Added
+- `backend/app/services/section_retrieval.py`: AI-assisted steel section retrieval service using Gemini 2.0 Flash (google-genai SDK v1.x). Fetches raw HTML from supplier catalogue via httpx, passes to Gemini for structured JSON extraction of UB sections above minimum Wpl_y threshold, cross-checks against parts_library.json cache (cached entries take precedence), then runs `_check_section()` on each candidate lightest-first. Falls back to full parts_library.json iteration on any exception. `source` field in return dict indicates "live" or "cache".
+- `backend/app/routers/select_section.py`: `POST /api/select-section` endpoint. Accepts wind + post geometry + steel grade inputs; computes M_Ed/V_Ed from wind, calls retrieval service, returns lightest passing section with source attribution.
+- `backend/app/calculation/steel.py`: `_check_section()` helper extracted from inner loop of `compute_steel_design()`. Takes a section dict + pre-computed demand scalars; runs LTB + deflection + shear checks; returns full result dict with `pass` bool. `compute_steel_design()` now delegates to this function — no behaviour change.
+- `backend/app/main.py`: `select_section` router registered.
+- `pyproject.toml`: `httpx>=0.27.0` and `google-genai>=1.0.0` added as dependencies.
+- `.env` / `.env.example`: `GOOGLE_API_KEY` placeholder added.
+### Notes
+- `GOOGLE_API_KEY` must be populated in `backend/.env` with a valid Google AI Studio key before `POST /api/select-section` attempts live retrieval. Without it, the endpoint falls back to parts_library.json immediately.
+- Live retrieval URL targets Tata Steel UK UB table. If the page structure changes, LLM extraction will fail silently and the cache fallback activates.
+- `_check_section()` is also importable by the retrieval service and any future endpoints that need to verify an arbitrary section dict.
+
+---
+
 ## [0.11.3] — 2026-04-19
 ### Fixed
 - `constants.py`: `DA1_C1 fos_overturning` corrected 1.35 → 1.0. The EQU overturning check applies `gamma_G_stb=0.9` to the stabilising moment before computing ODF; once that factor is in, the threshold is ODF ≥ 1.0. Setting 1.35 was double-counting the partial factor. Confirmed from P105 T2 page 7: ODF=1.15 is explicitly marked OK → now PASS.

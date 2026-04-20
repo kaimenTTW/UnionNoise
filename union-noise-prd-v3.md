@@ -341,22 +341,63 @@ The company does not maintain a fixed parts inventory. They order from various s
 - Other suppliers are used as needed — the system should not be locked to one source
 - `parts_library.json` is retained as a **cache and offline fallback only** — not the primary source
 
-**Member selection workflow:**
+**Member selection workflow — embedded in calculation chain:**
+
+Section selection is **not a separate user action**. It runs automatically as part of the
+`POST /api/calculate` chain, triggered by "Run Calculations" in Step 3.
 
 ```
-1. Compute M_Ed from wind + post geometry (deterministic)
-2. AI web search: query supplier for lightest UB section
-   where Mb,Rd > M_Ed after LTB reduction
-3. Engine verifies retrieved section against all three checks:
-   UR_moment, UR_deflection (L/n), UR_shear
-4. If any check fails → AI retrieves next heavier section → retry
-5. Optimisation gate: max(UR_moment, UR_deflection, UR_shear) >= 0.95
-   → section accepted as optimised
-   All URs < 0.60 → flag as potentially over-conservative (advisory)
-6. Section fixed → all downstream calculations use its geometry
+Run Calculations triggered
+  ↓
+1. wind.py: compute design_pressure, M_Ed, V_Ed
+  ↓
+2. section_retrieval.select_section():
+   a. httpx fetches Continental Steel Singapore HTML
+   b. Gemini 2.0 Flash extracts UB section properties as JSON
+   c. Verify extracted sections against parts_library.json (±2% tolerance)
+   d. Sort by mass_kg_per_m ascending
+   e. _check_section() on each → first passing (UR_moment, UR_deflection, UR_shear < 1.0)
+   f. Return section + selection_source ("live" or "cache")
+   — Falls back to parts_library.json on any retrieval/extraction failure
+  ↓
+3. Section fixed — all downstream uses this section's geometry
+  ↓
+4. foundation.py: DA1-C1, DA1-C2, SLS, EQU, drained + undrained
+5. connection.py: bolt, weld, base plate, G clamp
+6. subframe.py: CHS pipe bending check
+7. lifting.py: hole shear + hook tension/bond
+  ↓
+8. All results returned in single response
+   selection_source visible in steel derivation panel
 ```
 
-**Sort key for local fallback:** `mass_kg_per_m` ascending. Not `Wpl_y_cm3` — sorting by Wpl_y can incorrectly prefer a heavier section with marginally lower Wpl_y.
+**Transparency:** The derivation panel for the steel module shows selection provenance:
+source (live Continental Steel / local cache), sections retrieved count, verification status,
+and why the selected section was chosen (lightest passing all three checks).
+
+**Engineer confirmation:** Step 4 (Design Review) is where the engineer reviews and
+accepts the selected members before proceeding to output generation. Overrides are
+possible at that step, not during selection.
+
+**Endpoint:** `POST /api/select-section` exists as a standalone endpoint for testing
+retrieval in isolation. It is not called from the frontend directly — it is called
+internally by `POST /api/calculate` through the retrieval service.
+
+**Future cache architecture (PostgreSQL):**
+```
+sections_cache table:
+  designation       TEXT PRIMARY KEY
+  mass_kg_per_m     FLOAT
+  h_mm, b_mm, ...   FLOAT  (all section properties)
+  last_retrieved_at TIMESTAMP
+  source_url        TEXT
+
+On successful retrieval: upsert into sections_cache
+On fetch failure: query sections_cache before parts_library.json
+```
+
+Section geometry (Iy, Wpl etc.) is a physical constant — safe to cache permanently.
+Availability and pricing are transient — always fetch fresh, never cache.
 
 **Fixed standard components (not retrieved from supplier):**
 
@@ -383,9 +424,11 @@ The system uses two JSON data files whose purpose has evolved as the project und
 
 Contains 107 universal beam sections with full section properties (Iy, Iz, Iw, It, Wpl, Wel, h, b, tf, tw, r, mass). These are industry-standard physical constants — not Union Noise's inventory. Any steel supplier stocks these sections and the properties never change between suppliers.
 
-Current role: offline fallback cache used when AI web search is unavailable.
-Primary source: AI web search of Continental Steel Singapore and other suppliers at design time.
-Evolution: when Session 4 (AI retrieval) is built, code must explicitly attempt web search first and fall back to this file only on failure.
+Current role: offline fallback cache — used when Gemini retrieval fails for any reason.
+Primary source: Gemini 2.0 Flash extraction from Continental Steel Singapore (implemented v0.12.0).
+The retrieval service always attempts live fetch first and falls back to this file on failure.
+Section geometry (Iy, Wpl etc.) is a physical constant — safe to cache permanently.
+Availability and pricing are transient — always fetch fresh, never cache pricing.
 
 **`connection_library.json` — standard practice reference (prototype only)**
 
@@ -393,12 +436,14 @@ Contains three base plate and bolt configurations derived from Rowena's P105 dra
 
 Current role (prototype): lookup table for the Session 2 connection checks. Used to provide working validation numbers against P105 and avoid placeholder values during development.
 Future role: to be refactored into a **standard practice constants file** storing fixed geometric rules (edge distance = 50mm, standard embedment = 400mm, weld size rules) rather than specific project configurations. Base plate dimensions, bolt count, and Ds will become calculation outputs derived from M_Ed, V_Ed, and the selected section geometry — not looked up from this file.
-When to refactor: after Session 2 is validated against P105. Do not refactor before validation — the current configs are needed for the P105 bolt tension UR = 0.37 target.
+When to refactor: P105 T2 validation is complete (v0.10.4). Refactor in a future session
+after the prototype is demonstrated to the client and PE. Do not refactor during active
+prototype development — the current configs are still needed for consistent calculation output.
 
 **In summary:**
 - Neither file is a permanent inventory or catalogue
 - `parts_library.json` stays as-is indefinitely as a fallback cache
-- `connection_library.json` is a temporary prototype scaffold — expect to refactor after Session 2 validation
+- `connection_library.json` is a temporary prototype scaffold — refactor after client demo
 
 #### 2.7 Structural Acceptance Gate ✅ CONFIRMED (PE calculation report)
 
@@ -1259,22 +1304,76 @@ All Claude API calls in the prototype go **frontend → FastAPI backend → Clau
 
 - "Confirm Alignment" button — saves all polylines and all segment tables to ProjectContext, marks step complete
 
-**Steps 3–6 — Scaffolds only**
-- Each step renders its title, subtitle, and a clear placeholder message
-- "Continue" button advances to next step for demo navigation
-- Step 6 shows a summary card of all ProjectContext values collected so far
-- Step 3 opens directly on the Design Parameters tab — no code selection tab
-  (codes are fixed constants, not user-selectable — see Section 2.3)
+**Step 3 — Design Parameters + Calculations (FUNCTIONAL)**
+
+Full design parameters form across four groups: Wind, Post, Foundation, Soil Parameters.
+All fields bound to Zustand store with OverridableValue pattern for vb and ψs.
+
+Calculation chain runs on "Run Calculations" button:
+```
+wind → section selection (Gemini/cache) → steel checks →
+foundation (drained + undrained) → connection → subframe → lifting
+```
+
+Section selection is embedded in the chain — it is NOT a separate user action.
+After wind computes M_Ed, the backend calls the section retrieval service:
+  1. Gemini 2.0 Flash queries Continental Steel Singapore for UB sections
+  2. Lightest section passing all three checks (moment, deflection, shear) is selected
+  3. Falls back to parts_library.json if live retrieval fails
+  4. selection_source returned in response ("live" or "cache")
+
+All results displayed in collapsible panels with DerivationPanel for each module:
+  - Wind: qp, design pressure, shelter factor chain
+  - Steel: section designation, LTB chain, all URs, selection source
+  - Foundation: SLS/DA1-C1/DA1-C2 table, drained + undrained bearing
+  - Connection: 7-check table (bolt tension, shear, combined, embedment, weld, base plate, G clamp)
+  - Subframe: section, M_Ed, Mc,Rd, UR
+  - Lifting: hole shear + hook tension/bond sub-sections
+  - Overall pass/fail banner across all modules
+
+Step 3 opens directly on Design Parameters tab — no code selection tab.
+Applicable codes are fixed constants in the backend (see Section 2.3).
+
+**Step 4 — Design Review / Acceptance Gate (TO BUILD)**
+
+Engineer reviews all selected members and utilisation ratios before proceeding to outputs.
+This is a deliberate checkpoint — the engineer confirms the design is acceptable.
+
+Content:
+  - Member summary table: all selected sections with UR per check
+  - Source attribution per member (live retrieval / cache / PE confirmed)
+  - Pass/fail status per module
+  - Override panel: engineer can flag any member for manual review
+  - "Proceed to Outputs" button — only enabled when all checks pass
+  - "Back to Step 3" — returns to parameters for adjustment
+
+This step exists because the engineer should knowingly approve all member selections
+before a PE-endorsable report is generated. It mirrors the PE's own review process.
+
+**Step 5 — Drawing Generation (BLOCKED)**
+
+DXF drawing generation using ezdxf.
+BLOCKED — pending drawing samples from Rowena.
+Standard drawing format: plan view, elevation, section details, bolt setting template.
+
+**Step 6 — Output Generation (TO BUILD)**
+
+Two outputs:
+  1. PDF Calculation Report — ReportLab, 8-section PE format matching P105 T2 structure.
+     Sections: project info, wind analysis, steel design, connection, subframe, lifting,
+     foundation, summary utilisation ratios. All override reasons shown explicitly.
+     Download button → triggers POST /api/report/generate.
+
+  2. Bill of Quantities (BQ) — Excel via openpyxl.
+     BLOCKED — pending BQ format samples from Rowena.
 
 ### What NOT to Build in the First Iteration
-- No calculation logic of any kind
-- No steel design, foundation design, or wind formula implementation
-- No drawing generation
-- No PDF report generation
-- No BQ/Excel generation
-- No user authentication
-- No project archival/database (local state only)
-- No LangGraph orchestration
+- No LangGraph orchestration (direct API calls used throughout)
+- No user authentication (free-text name only)
+- No project database persistence (session state only — PostgreSQL deferred)
+- No long span configurations (Phase 2)
+- No soldier pile foundation (Phase 2)
+- No permanent project evaluation (Phase 2)
 
 ### ProjectContext (Zustand Store Shape)
 

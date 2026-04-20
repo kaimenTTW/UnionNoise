@@ -17,9 +17,9 @@ from pydantic import BaseModel, Field
 from app.calculation.connection import compute_connection
 from app.calculation.foundation import compute_foundation
 from app.calculation.lifting import compute_lifting
-from app.calculation.steel import compute_steel_design
 from app.calculation.subframe import compute_subframe
 from app.calculation.wind import compute_design_pressure
+from app.services.section_retrieval import select_section
 
 router = APIRouter(prefix="/api", tags=["calculate"])
 
@@ -132,6 +132,8 @@ class SteelResult(BaseModel):
     Lcr_mm: float | None = None
     post_length_m: float | None = None
     deflection_limit_n: float | None = None
+    selection_source: str | None = None
+    fallback_reason: str | None = None
     pass_: bool = Field(False, alias="pass")
     error: str | None = None
 
@@ -195,7 +197,7 @@ class CalculateResponse(BaseModel):
 # ── Endpoint ──────────────────────────────────────────────────────────────────
 
 @router.post("/calculate", response_model=CalculateResponse)
-def calculate(body: CalculateRequest) -> CalculateResponse:
+async def calculate(body: CalculateRequest) -> CalculateResponse:
     """
     Run the full design chain:
     1. Wind pressure (EC1 + SG NA)
@@ -224,12 +226,20 @@ def calculate(body: CalculateRequest) -> CalculateResponse:
 
     wind_result = WindResult(**wind_raw)
 
-    # ── 2. Steel ──
+    # ── 2. Steel section selection (live retrieval → parts_library fallback) ──
     try:
-        steel_raw = compute_steel_design(
-            design_pressure_kPa=wind_raw["design_pressure_kPa"],
-            post_spacing_m=body.post_spacing,
-            subframe_spacing_m=body.subframe_spacing,
+        w_kN_per_m = wind_raw["design_pressure_kPa"] * body.post_spacing
+        L_mm = body.post_length * 1000
+        M_Ed_kNm = 1.5 * w_kN_per_m * body.post_length ** 2 / 2
+        V_Ed_kN = 1.5 * w_kN_per_m * body.post_length
+        Lcr_mm = body.subframe_spacing * 1000
+
+        steel_raw = await select_section(
+            M_Ed_kNm=M_Ed_kNm,
+            V_Ed_kN=V_Ed_kN,
+            w_kN_per_m=w_kN_per_m,
+            L_mm=L_mm,
+            Lcr_mm=Lcr_mm,
             post_length_m=body.post_length,
             deflection_limit_n=body.deflection_limit_n,
         )
@@ -239,7 +249,12 @@ def calculate(body: CalculateRequest) -> CalculateResponse:
     if "error" in steel_raw:
         steel_result = SteelResult(**{"pass": False, "error": steel_raw["error"]})
     else:
-        steel_result = SteelResult(**{**steel_raw})
+        steel_result = SteelResult(**{
+            **steel_raw,
+            "pass": steel_raw.get("pass", False),
+            "selection_source": steel_raw.get("source"),
+            "fallback_reason": steel_raw.get("fallback_reason"),
+        })
 
     # ── 3. Connection ──
     connection_result: ConnectionResult | None = None
