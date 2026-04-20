@@ -119,6 +119,8 @@ export interface DesignParameters {
   cohesion_ck: number               // default 5
   /** Undrained shear strength cu (kPa). 0 = drained checks only. P105 T2 uses 30 kPa. */
   cu_kPa: number                    // default 0
+  /** Net pressure coefficient cp,net. 1.2 = porous TNCB panels (default). 1.3 = solid panels. */
+  cp_net: number                    // default 1.2
 }
 
 // ─── Calculation results (returned from POST /api/calculate) ─────────────────
@@ -267,12 +269,17 @@ export interface ConnectionCalcResult {
 }
 
 export interface SubframeCalcResult {
-  section?: string
+  designation?: string
+  od_mm?: number
+  t_mm?: number
+  mass_kg_per_m?: number
   w_kN_per_m?: number
   M_Ed_kNm?: number
   Mc_Rd_kNm?: number
   UR_subframe?: number
+  hardware_note?: string | null
   pass?: boolean
+  error?: string
 }
 
 export interface LiftingCalcResult {

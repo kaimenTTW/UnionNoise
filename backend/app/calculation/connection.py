@@ -193,9 +193,11 @@ def compute_connection(
     # G clamp tributary height = barrier_height/2 — confirmed P105 T2 PE page 4.
     # n_clamps from config; defaults to 5 (PE page 4 confirmed).
     failure_load_kN = 23.29   # kN
-    n_clamps: int = config.get("n_clamps_per_post", 5)
+    n_clamps_provided: int = config.get("n_clamps_per_post", 5)
     F_wind_kN = external_pressure_kPa * (barrier_height_m / 2) * post_spacing_m
     F_factored_kN = F_wind_kN * 1.5
+    n_clamps_required = math.ceil(F_factored_kN / failure_load_kN)
+    n_clamps = max(n_clamps_required, n_clamps_provided)
     F_per_clamp_kN = F_factored_kN / n_clamps
     UR_gclamp = F_per_clamp_kN / failure_load_kN
 
@@ -266,6 +268,8 @@ def compute_connection(
             "pass": UR_base_plate < 1.0,
         },
         "g_clamp": {
+            "n_clamps_required": n_clamps_required,
+            "n_clamps_provided": n_clamps_provided,
             "n_clamps": n_clamps,
             "F_wind_kN": round(F_wind_kN, 3),
             "F_factored_kN": round(F_factored_kN, 3),

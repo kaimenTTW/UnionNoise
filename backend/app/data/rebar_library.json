@@ -1,0 +1,7 @@
+[
+  {"bar": "H16", "diameter_mm": 16, "As_mm2": 201, "fub_N_per_mm2": 500},
+  {"bar": "H20", "diameter_mm": 20, "As_mm2": 314, "fub_N_per_mm2": 500},
+  {"bar": "H25", "diameter_mm": 25, "As_mm2": 491, "fub_N_per_mm2": 500},
+  {"bar": "H32", "diameter_mm": 32, "As_mm2": 804, "fub_N_per_mm2": 500},
+  {"bar": "H40", "diameter_mm": 40, "As_mm2": 1257, "fub_N_per_mm2": 500}
+]

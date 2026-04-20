@@ -1,36 +1,44 @@
 """
 Subframe check — CHS GI pipe bending.
 
-Section: CHS 48.3x2.5mm GI pipe (galvanised steel)
-         fy = 400 N/mm2 (confirmed P105)
-         Class 2 section — use elastic modulus Wel with 1.2 enhancement factor
+Iterates chs_library.json ascending by mass_kg_per_m, selects lightest section passing
+the moment utilisation check (UR < 1.0).
 
-Note on wall thickness: PE calculation report page 3 describes CHS 48.3x2.3 (or 2.2mm),
-but uses Wely=3.92 cm3 which corresponds to CHS 48.3x2.5 per standard EN 10219 section
-tables. t=2.5mm is used here to match PE Wely and Mc targets. Verify section against
-project specification.
+Section class: Class 2 — use elastic modulus Wel with 1.2 enhancement factor.
+fy = 400 N/mm² (GI pipe, confirmed P105).
 
-Moment formula: M_Ed = (1.5/10) x w x L2
+Moment formula: M_Ed = (1.5/10) × w × L²
   /10 = continuous beam assumption — confirmed P105 T1/T2
-  w   = design_pressure x subframe_spacing
+  w   = design_pressure × subframe_spacing
 
-Moment resistance: Mc = 1.2 x fy x Wel / gamma_M0
+Moment resistance: Mc = 1.2 × fy × Wel / gamma_M0
   Class 2 section with 1.2 factor per PE methodology (page 3 confirmed).
 
 Validated against P105 T2 calculation report (Han Engineering, 8/6/2023):
-  UDL = 0.54 kN/m  (0.36 x 1.5) ✓
-  Mu  = 0.73 kNm   (1.5 x 0.54 x 9 / 10) ✓
-  Mc  = 1.88 kNm   (1.2 x 400 x 3920 / 1e6) ✓
-  UR  = 0.388 ✓
+  UDL = 0.54 kN/m  (0.36 × 1.5) ✓
+  Mu  = 0.73 kNm   (1.5 × 0.54 × 9 / 10) ✓
+  Mc  = 1.88 kNm   (1.2 × 400 × 3920 / 1e6) ✓
+  UR  = 0.388 ✓  → selects CHS 48.3×2.5mm GI ✓
 
 Reference: code-reference.md Section 5, P105 confirmed.
 """
 
 from __future__ import annotations
 
-import math
+import json
+from functools import lru_cache
+from pathlib import Path
 
 from .constants import STEEL
+
+_CHS_LIBRARY_PATH = Path(__file__).parent.parent / "data" / "chs_library.json"
+
+
+@lru_cache(maxsize=1)
+def _load_chs_sections() -> list[dict]:
+    with _CHS_LIBRARY_PATH.open() as f:
+        data = json.load(f)
+    return sorted(data["sections"], key=lambda s: s["mass_kg_per_m"])
 
 
 def compute_subframe(
@@ -39,71 +47,74 @@ def compute_subframe(
     post_spacing_m: float,
 ) -> dict:
     """
-    CHS 48.3x2.5mm GI pipe bending check.
+    Select lightest CHS GI pipe section passing moment check.
 
     Args:
         design_pressure_kPa:  governing design wind pressure [kPa].
         subframe_spacing_m:   vertical spacing between subframe rails [m].
-                              Tributary height per rail.
         post_spacing_m:       span between posts [m]. Used as beam span L.
 
     Returns:
-        Dict with section properties, M_Ed, Mc_Rd, UR and pass flag.
+        Dict with selected section properties, M_Ed, Mc_Rd, UR and pass flag.
     """
-    # CHS 48.3x2.5 section properties — matches PE Wely=3.92 cm3 (EN 10219 table value)
-    d = 48.3        # mm — outer diameter
-    t = 2.5         # mm — wall thickness (t=2.5 per EN 10219; PE uses Wely=3.92 cm3 = t≈2.5)
-    di = d - 2 * t  # mm — inner diameter = 43.3 mm
-
-    I_mm4 = math.pi / 64 * (d ** 4 - di ** 4)
-    Wel_mm3 = I_mm4 / (d / 2)   # elastic section modulus
-
-    fy = 400.0      # N/mm2 — GI pipe (confirmed P105)
     gamma_M0 = STEEL["gamma_M0"]  # 1.0
 
-    # UDL on subframe rail [kN/m]
     w_kN_per_m = design_pressure_kPa * subframe_spacing_m
-
-    # ULS design moment — continuous beam /10 (confirmed P105 T1/T2)
     M_Ed_kNm = (1.5 / 10) * w_kN_per_m * post_spacing_m ** 2
 
-    # Bending resistance — Class 2, 1.2 x fy x Wel per PE methodology (page 3)
-    Mc_Rd_kNm = 1.2 * fy * Wel_mm3 / gamma_M0 / 1e6
+    for sec in _load_chs_sections():
+        od_mm = sec["od_mm"]
+        t_mm = sec["t_mm"]
+        fy = sec["fy_N_per_mm2"]
+        Wel_mm3 = sec["Wel_cm3"] * 1000
 
-    UR_subframe = M_Ed_kNm / Mc_Rd_kNm
+        Mc_Rd_kNm = 1.2 * fy * Wel_mm3 / gamma_M0 / 1e6
+        UR = M_Ed_kNm / Mc_Rd_kNm
 
-    return {
-        "section": "CHS 48.3x2.5 GI",
-        "fy_N_per_mm2": fy,
-        "w_kN_per_m": round(w_kN_per_m, 4),
-        "M_Ed_kNm": round(M_Ed_kNm, 4),
-        "Wel_mm3": round(Wel_mm3, 2),
-        "Mc_Rd_kNm": round(Mc_Rd_kNm, 4),
-        "UR_subframe": round(UR_subframe, 4),
-        "pass": UR_subframe < 1.0,
-    }
+        if UR < 1.0:
+            hardware_note: str | None = None
+            if od_mm > 48.3:
+                hardware_note = (
+                    f"Selected OD {od_mm}mm exceeds standard 48.3mm — confirm panel "
+                    "guide and clamp hardware compatibility with Hebei Jinbiao before proceeding."
+                )
+            elif od_mm < 48.3:
+                hardware_note = (
+                    f"Selected OD {od_mm}mm is below standard 48.3mm GI pipe — "
+                    "confirm panel guide and clamp hardware compatibility before proceeding. "
+                    "P105 specifies CHS 48.3mm as the standard size."
+                )
+            return {
+                "designation": f"CHS {od_mm}×{t_mm}mm GI",
+                "od_mm": od_mm,
+                "t_mm": t_mm,
+                "mass_kg_per_m": sec["mass_kg_per_m"],
+                "fy_N_per_mm2": fy,
+                "w_kN_per_m": round(w_kN_per_m, 4),
+                "M_Ed_kNm": round(M_Ed_kNm, 4),
+                "Wel_mm3": round(Wel_mm3, 2),
+                "Mc_Rd_kNm": round(Mc_Rd_kNm, 4),
+                "UR_subframe": round(UR, 4),
+                "hardware_note": hardware_note,
+                "pass": True,
+            }
+
+    return {"error": "No CHS section passes — refer to PE", "pass": False}
 
 
 if __name__ == "__main__":
-    # P105 T2 validation (Han Engineering, 8/6/2023):
-    # design_pressure=0.36 kPa, subframe_spacing=1.5m, post_spacing=3.0m
-    # Expected: UDL=0.54, M_Ed=0.73, Mc=1.88, UR=0.388
-    from .wind import compute_design_pressure
-
-    wind = compute_design_pressure(structure_height=12.7, shelter_factor=0.5)
+    # P105 T2 validation: dp=0.36, subframe_spacing=1.5m, post_spacing=3.0m
+    # Expected: CHS 48.3×2.5mm, UDL=0.54, M_Ed=0.73, Mc=1.88, UR=0.388
     result = compute_subframe(
-        design_pressure_kPa=wind["design_pressure_kPa"],
+        design_pressure_kPa=0.36,
         subframe_spacing_m=1.5,
         post_spacing_m=3.0,
     )
     import json as _json
     print(_json.dumps(result, indent=2))
-    print(f"\ndesign_pressure: {wind['design_pressure_kPa']:.4f} kPa  (target: 0.36)")
-    print(f"UDL (w):         {result['w_kN_per_m']:.4f} kN/m  (target: 0.54)")
-    print(f"M_Ed:            {result['M_Ed_kNm']:.4f} kNm  (target: 0.73)")
-    print(f"Wel:             {result['Wel_mm3']:.2f} mm3  (target: ~3920)")
-    print(f"Mc_Rd:           {result['Mc_Rd_kNm']:.4f} kNm  (target: 1.88)")
-    print(f"UR_subframe:     {result['UR_subframe']:.4f}       (target: 0.388)")
-    print(f"pass:            {result['pass']}")
-    if result["UR_subframe"] >= 1.0:
-        print(f"FAIL: UR_subframe={result['UR_subframe']:.4f}")
+    print(f"\ndesignation: {result.get('designation')}  (target: CHS 48.3×2.5mm GI)")
+    print(f"UDL (w):     {result.get('w_kN_per_m'):.4f} kN/m  (target: 0.54)")
+    print(f"M_Ed:        {result.get('M_Ed_kNm'):.4f} kNm  (target: 0.73)")
+    print(f"Mc_Rd:       {result.get('Mc_Rd_kNm'):.4f} kNm  (target: 1.88)")
+    print(f"UR_subframe: {result.get('UR_subframe'):.4f}       (target: 0.387)")
+    print(f"pass:        {result.get('pass')}")

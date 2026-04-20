@@ -83,6 +83,19 @@ class CalculateRequest(BaseModel):
                     "footing weight is not present at that stage."
     )
 
+    # Wind — pressure coefficient
+    cp_net: float = Field(
+        1.2, gt=0,
+        description="Net pressure coefficient cp,net. Default 1.2 (porous TNCB panels, EC1 Table 7.9). "
+                    "Use 1.3 for solid panels — confirm with PE."
+    )
+
+    # Steel grade
+    steel_grade: str = Field(
+        "S275",
+        description="Steel grade. S275 → fy=275 N/mm². S355 → fy=355 N/mm²."
+    )
+
 
 # ── Response models ───────────────────────────────────────────────────────────
 
@@ -154,14 +167,19 @@ class ConnectionResult(BaseModel):
 
 
 class SubframeResult(BaseModel):
-    section: str
-    fy_N_per_mm2: float
-    w_kN_per_m: float
-    M_Ed_kNm: float
-    Wel_mm3: float
-    Mc_Rd_kNm: float
-    UR_subframe: float
-    pass_: bool = Field(..., alias="pass")
+    designation: str | None = None
+    od_mm: float | None = None
+    t_mm: float | None = None
+    mass_kg_per_m: float | None = None
+    fy_N_per_mm2: float | None = None
+    w_kN_per_m: float | None = None
+    M_Ed_kNm: float | None = None
+    Wel_mm3: float | None = None
+    Mc_Rd_kNm: float | None = None
+    UR_subframe: float | None = None
+    hardware_note: str | None = None
+    pass_: bool = Field(False, alias="pass")
+    error: str | None = None
 
     class Config:
         populate_by_name = True
@@ -220,6 +238,7 @@ async def calculate(body: CalculateRequest) -> CalculateResponse:
             shelter_factor=body.shelter_factor,
             vb=body.vb,
             return_period=body.return_period,
+            cp_net=body.cp_net,
         )
     except Exception as exc:
         raise HTTPException(status_code=422, detail=f"Wind calculation failed: {exc}") from exc
@@ -234,6 +253,7 @@ async def calculate(body: CalculateRequest) -> CalculateResponse:
         V_Ed_kN = 1.5 * w_kN_per_m * body.post_length
         Lcr_mm = body.subframe_spacing * 1000
 
+        fy = 275.0 if body.steel_grade == "S275" else 355.0
         steel_raw = await select_section(
             M_Ed_kNm=M_Ed_kNm,
             V_Ed_kN=V_Ed_kN,
@@ -242,6 +262,7 @@ async def calculate(body: CalculateRequest) -> CalculateResponse:
             Lcr_mm=Lcr_mm,
             post_length_m=body.post_length,
             deflection_limit_n=body.deflection_limit_n,
+            fy=fy,
         )
     except Exception as exc:
         raise HTTPException(status_code=422, detail=f"Steel calculation failed: {exc}") from exc
@@ -283,7 +304,7 @@ async def calculate(body: CalculateRequest) -> CalculateResponse:
             subframe_spacing_m=body.subframe_spacing,
             post_spacing_m=body.post_spacing,
         )
-        subframe_result = SubframeResult(**{**subframe_raw, "pass": subframe_raw["pass"]})
+        subframe_result = SubframeResult(**{**subframe_raw, "pass": subframe_raw.get("pass", False)})
     except Exception as exc:
         raise HTTPException(status_code=422, detail=f"Subframe calculation failed: {exc}") from exc
 

@@ -832,7 +832,7 @@ function SubframePanel({ sf }: { sf: SubframeCalcResult }) {
       <div className="grid grid-cols-4 gap-3 text-sm">
         <div>
           <p className="text-muted text-xs">Section</p>
-          <p className="font-mono">{sf.section ?? '—'}</p>
+          <p className="font-mono">{sf.designation ?? '—'}</p>
         </div>
         <div>
           <p className="text-muted text-xs">M_Ed</p>
@@ -851,6 +851,11 @@ function SubframePanel({ sf }: { sf: SubframeCalcResult }) {
           </p>
         </div>
       </div>
+      {sf.hardware_note && (
+        <p className="text-xs text-warning/80 border border-warning/30 rounded px-2 py-1.5 bg-warning/5">
+          ⚠ {sf.hardware_note}
+        </p>
+      )}
       <DerivationPanel rows={buildSubframeRows(sf)} />
     </div>
   )
@@ -1078,6 +1083,8 @@ export default function Step3() {
         vertical_load_G_kN: dp.vertical_load_G_kN,
         post_weight_kN: dp.post_weight_kN ?? 6,
         cu_kPa: dp.cu_kPa ?? 0,
+        cp_net: dp.cp_net ?? 1.2,
+        steel_grade: dp.steel_grade ?? 'S275',
       }
       const res = await fetch('/api/calculate', {
         method: 'POST',
@@ -1215,6 +1222,17 @@ export default function Step3() {
               }}
               onChange={(v) => set({ shelter_factor: v })}
             />
+
+            <Field label="Panel type (cp,net)" hint="Porous TNCB panels = 1.2 (standard). Solid panels — confirm value with PE.">
+              <select
+                className="field-input"
+                value={dp.cp_net ?? 1.2}
+                onChange={(e) => set({ cp_net: parseFloat(e.target.value) })}
+              >
+                <option value={1.2}>Porous (cp,net = 1.2)</option>
+                <option value={1.3}>Solid — confirm with PE (cp,net = 1.3)</option>
+              </select>
+            </Field>
           </FieldGroup>
 
           {/* ── Post ── */}
@@ -1256,6 +1274,17 @@ export default function Step3() {
                 value={numericValue(dp.deflection_limit_n)}
                 onChange={(e) => set({ deflection_limit_n: parseNum(e.target.value) ?? 65 })}
               />
+            </Field>
+
+            <Field label="Steel grade" hint="S275 = standard (fy=275 N/mm²). S355 = higher strength (fy=355 N/mm²).">
+              <select
+                className="field-input"
+                value={dp.steel_grade ?? 'S275'}
+                onChange={(e) => set({ steel_grade: e.target.value as 'S275' | 'S355' })}
+              >
+                <option value="S275">S275 (fy = 275 N/mm²)</option>
+                <option value="S355">S355 (fy = 355 N/mm²)</option>
+              </select>
             </Field>
           </FieldGroup>
 

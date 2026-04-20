@@ -214,9 +214,14 @@ async def select_section(
         fallback_reason = f"{type(exc).__name__}: {exc}"
         print(f"[section_retrieval] Exception: {fallback_reason}", flush=True)
 
-    # Fallback: iterate full parts_library.json sorted ascending by mass
+    # Fallback: iterate parts_library.json filtered by fy grade, sorted ascending by mass
     print("[section_retrieval] Running cache fallback...", flush=True)
-    for sec in _load_sections():
+    all_sections = _load_sections()
+    grade_sections = [s for s in all_sections if s.get("fy_N_per_mm2") == fy]
+    if not grade_sections:
+        print(f"[section_retrieval] WARNING: no sections with fy={fy} in library — using all sections", flush=True)
+        grade_sections = all_sections
+    for sec in grade_sections:
         result = _check_section(sec=sec, **kwargs)
         if result["pass"]:
             print(

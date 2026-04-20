@@ -1,5 +1,25 @@
 # CHANGELOG
 
+## [0.14.0] — 2026-04-20
+### Added
+- `backend/app/data/chs_library.json` — 51 CHS GI pipe sections from EN 10219, all with `fy_N_per_mm2: 400`, sorted ascending by `mass_kg_per_m`. Used by subframe selection.
+- `backend/app/data/rebar_library.json` — H16–H40 high-yield rebar with correct gross `As_mm2 = π/4 × d²`. Used by lifting hook selection.
+### Changed
+- `subframe.py`: replaced hardcoded CHS 48.3×2.5mm with library iteration — selects lightest CHS section passing `Mc_Rd = 1.2 × fy × Wel / γM0` moment check (UR < 1.0). Returns `designation`, `od_mm`, `t_mm`, `mass_kg_per_m`, full derivation fields, and `hardware_note` when selected OD ≠ 48.3mm.
+- `lifting.py`: replaced fixed H20 bar with `rebar_library.json` iteration — selects lightest bar passing both tension (UR_tension < 1.0) and bond (UR_bond < 1.0) checks with n_hooks=4; retries with n_hooks=6 if no bar passes at 4 hooks. Returns `bar`, `diameter_mm`, `As_mm2`, and `pe_note` documenting the PE As discrepancy.
+- `connection.py`: `n_clamps` now computed dynamically as `max(ceil(F_factored / failure_load), n_clamps_provided)` instead of hardcoded. Response includes `n_clamps_required`, `n_clamps_provided`, and `n_clamps` (used).
+- `wind.py` + `calculate.py`: `cp_net` promoted from hardcoded constant (`SG_NA["cp_net"]`) to user-selectable parameter (default 1.2). Exposed in `CalculateRequest` and passed through to `compute_design_pressure()`.
+- `calculate.py` + `section_retrieval.py`: `steel_grade` (S275/S355) added to `CalculateRequest`; derives `fy` (275 or 355 N/mm²) and passes to section selection. Cache fallback now filters `parts_library.json` by `fy_N_per_mm2 == fy`; falls back to all sections with a warning if no grade match found.
+- `frontend/src/types/index.ts`: `DesignParameters` — added `cp_net: number`; `SubframeCalcResult` updated to match new subframe.py output (`designation`, `od_mm`, `t_mm`, `mass_kg_per_m`, `Mc_Rd_kNm`, `UR_subframe`, `hardware_note`).
+- `frontend/src/store/projectStore.ts`: `cp_net: 1.2` added to `defaultDesignParameters`.
+- `frontend/src/steps/Step3.tsx`: added `cp_net` selector in Wind group and `steel_grade` selector in Post group; both wired to API body. `SubframePanel` updated: `sf.section` → `sf.designation`, hardware_note displayed as a warning callout.
+### Notes
+- Lifting hook `As`: system uses correct rebar_library values (H20 = 314 mm²). PE report uses As=490.94 mm² (H25 area applied to H20 bar). Both are correct per their respective methodologies; `pe_note` documents the discrepancy.
+- Subframe hardware note fires when selected OD ≠ 48.3mm (standard clamp size); does not hard-fail — flags for engineer review.
+- CHS and rebar section properties are physical constants from EN standards — not user-configurable.
+
+---
+
 ## [0.12.5] — 2026-04-20
 ### Fixed
 - `section_retrieval.py`: replaced async `_fetch_page()` with a thread-based implementation that runs Playwright inside `_playwright_fetch_sync()` — a dedicated worker thread gets a fresh `asyncio.new_event_loop()` (always a SelectorEventLoop), bypassing uvicorn's ProactorEventLoop on Windows entirely. The outer `_fetch_page()` remains async and offloads to the thread via `loop.run_in_executor()`.

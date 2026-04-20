@@ -75,25 +75,25 @@ def compute_design_pressure(
     shelter_factor: float,
     vb: float | None = None,
     return_period: int = 50,
+    cp_net: float = 1.2,
 ) -> dict:
     """
     Full wind chain: qp → design_pressure.
 
     design_pressure = qp × cp,net × ψs                [kPa]
-    cp,net = 1.2 (porous panel — EN 1991-1-4 Table 7.9, confirmed P105)
+    cp,net: user-selectable — default 1.2 (porous panel, EN 1991-1-4 Table 7.9, confirmed P105).
     shelter_factor ψs: 1.0 (no shelter) or derived from Figure 7.20 lookup.
 
-    P105 validation: structure_height=12.7, shelter_factor=0.5
+    P105 validation: structure_height=12.7, shelter_factor=0.5, cp_net=1.2
     → qp=0.598 kPa, design_pressure=0.36 kPa ✓
 
     Args:
         structure_height: barrier height in metres (ze).
         shelter_factor:   ψs — feed 0.5 for P105 validation; 1.0 for no shelter.
         vb:               basic wind velocity [m/s]. Defaults to SG NA 20 m/s.
-                          Override only when site-specific data justifies it (PE judgement).
         return_period:    T in years. Drives Cprob per EC1 Eq 4.2. Default 50yr → Cprob=1.0.
+        cp_net:           Net pressure coefficient. Default 1.2 (porous TNCB panels).
     """
-    cp_net = SG_NA["cp_net"]
     rho = SG_NA["rho"]
     vb_base = vb if vb is not None else SG_NA["vb0"]
     cdir = SG_NA["cdir"]
