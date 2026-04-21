@@ -9,7 +9,7 @@ load_dotenv()
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.routers import calculate, extract, select_section
+from app.routers import calculate, extract, optimize_section, select_section
 
 app = FastAPI(
     title="Union Noise API",
@@ -34,6 +34,7 @@ app.add_middleware(
 app.include_router(extract.router)
 app.include_router(calculate.router)
 app.include_router(select_section.router)
+app.include_router(optimize_section.router)
 
 
 @app.get("/health")

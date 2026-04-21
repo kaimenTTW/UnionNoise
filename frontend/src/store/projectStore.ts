@@ -1,5 +1,5 @@
 import { create } from 'zustand'
-import type { BarrierType, CalibrationData, CalculationResults, DesignParameters, OverridableValue, Polyline, ProjectInfo, ProjectMeta, SegmentRow, SiteData } from '../types'
+import type { BarrierType, CalibrationData, CalculationResults, DesignParameters, OverridableValue, Polyline, ProjectInfo, ProjectMeta, SegmentRow, SiteData, SteelSection } from '../types'
 
 interface ProjectStore {
   project_info: ProjectInfo
@@ -8,6 +8,7 @@ interface ProjectStore {
   design_parameters: DesignParameters
   calculation_results: CalculationResults | null
   step3_confirmed: boolean
+  confirmed_section: SteelSection | null
 
   setProjectInfo: (partial: Partial<ProjectInfo>) => void
   setSiteData: (partial: Partial<SiteData>) => void
@@ -25,6 +26,7 @@ interface ProjectStore {
   initMeta: (createdBy: string) => void
   setDesignParameters: (partial: Partial<DesignParameters>) => void
   setCalculationResults: (results: CalculationResults) => void
+  setConfirmedSection: (section: SteelSection | null) => void
   confirmStep1: () => void
   confirmStep2: () => void
   confirmStep3: () => void
@@ -64,7 +66,6 @@ const defaultDesignParameters: DesignParameters = {
   post_length: null,
   deflection_limit_n: 65,
   concrete_grade: 'C25/30',
-  steel_grade: 'S275',
   rebar_grade: 'B500B',
   bolt_grade: '8.8',
   fck: 25,
@@ -80,6 +81,7 @@ const defaultDesignParameters: DesignParameters = {
   cohesion_ck: 5,
   cu_kPa: 0,
   cp_net: 1.2,
+  remarks: '',
 }
 
 const defaultMeta: ProjectMeta = {
@@ -159,6 +161,7 @@ export const useProjectStore = create<ProjectStore>((set, get) => ({
   design_parameters: defaultDesignParameters,
   calculation_results: null,
   step3_confirmed: false,
+  confirmed_section: null,
 
   setProjectInfo: (partial) =>
     set((s) => ({ project_info: { ...s.project_info, ...partial } })),
@@ -256,6 +259,8 @@ export const useProjectStore = create<ProjectStore>((set, get) => ({
 
   setCalculationResults: (results) => set({ calculation_results: results }),
 
+  setConfirmedSection: (section) => set({ confirmed_section: section }),
+
   confirmStep1: () =>
     set((s) => ({
       project_info: { ...s.project_info, step1_confirmed: true },
@@ -269,7 +274,7 @@ export const useProjectStore = create<ProjectStore>((set, get) => ({
   confirmStep3: () => set({ step3_confirmed: true }),
 
   reset: () =>
-    set({ project_info: defaultProjectInfo, site_data: defaultSiteData, meta: defaultMeta, design_parameters: defaultDesignParameters, calculation_results: null, step3_confirmed: false }),
+    set({ project_info: defaultProjectInfo, site_data: defaultSiteData, meta: defaultMeta, design_parameters: defaultDesignParameters, calculation_results: null, step3_confirmed: false, confirmed_section: null }),
 }))
 
 // ─── Derived selectors ────────────────────────────────────────────────────────

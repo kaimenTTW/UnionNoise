@@ -8,7 +8,10 @@ import type {
   DesignParameters,
   FootingType,
   LiftingCalcResult,
+  OptimiseResult,
   OverridableValue,
+  SelectionResult,
+  SteelSection,
   SubframeCalcResult,
 } from '../types'
 
@@ -939,6 +942,152 @@ function LiftingPanel({ lift }: { lift: LiftingCalcResult }) {
   )
 }
 
+// ─── Section selection cards ──────────────────────────────────────────────────
+
+function SectionCard({
+  result,
+  onOptimise,
+  onUse,
+  isOptimising,
+}: {
+  result: SelectionResult
+  onOptimise: () => void
+  onUse: () => void
+  isOptimising: boolean
+}) {
+  const { section, checks, source, fallback_reason } = result
+  const allPass = checks.pass
+  const gradeLabel = section.fy_N_per_mm2 >= 355 ? 'S355' : 'S275'
+  const sourceLabel =
+    source === 'live' ? 'Continental Steel (live)' : source === 'cache' ? 'Library (cached)' : 'Pre-selected'
+
+  return (
+    <div className="rounded border border-border bg-surface/40 p-4 space-y-3">
+      <div className="flex items-baseline justify-between">
+        <div>
+          <span className="font-mono font-semibold text-white text-base">UB {section.designation}</span>
+          <span className="ml-2 text-muted text-sm">{gradeLabel} · {section.mass_kg_per_m} kg/m</span>
+        </div>
+        <PassBadge pass={allPass} />
+      </div>
+      <p className="text-xs text-muted">Source: {sourceLabel}</p>
+      {fallback_reason && (
+        <p className="text-xs text-warning/80">{fallback_reason}</p>
+      )}
+      <div className="grid grid-cols-3 gap-2 text-xs">
+        <div>
+          <p className="text-muted mb-0.5">UR moment</p>
+          <span className={checks.UR_moment < 1.0 ? 'text-green-400 font-mono' : 'text-red-400 font-mono'}>
+            {checks.UR_moment.toFixed(3)} {checks.UR_moment < 1.0 ? '✓' : '✗'}
+          </span>
+        </div>
+        <div>
+          <p className="text-muted mb-0.5">UR deflection</p>
+          <span className={checks.UR_deflection < 1.0 ? 'text-green-400 font-mono' : 'text-red-400 font-mono'}>
+            {checks.UR_deflection.toFixed(3)} {checks.UR_deflection < 1.0 ? '✓' : '✗'}
+          </span>
+        </div>
+        <div>
+          <p className="text-muted mb-0.5">UR shear</p>
+          <span className={checks.UR_shear < 1.0 ? 'text-green-400 font-mono' : 'text-red-400 font-mono'}>
+            {checks.UR_shear.toFixed(3)} {checks.UR_shear < 1.0 ? '✓' : '✗'}
+          </span>
+        </div>
+      </div>
+      {allPass ? (
+        <p className="text-xs text-green-400">All checks pass</p>
+      ) : (
+        <p className="text-xs text-warning">Some checks fail — optimisation recommended</p>
+      )}
+      <div className="flex gap-2 pt-1">
+        <button
+          type="button"
+          onClick={onOptimise}
+          disabled={isOptimising}
+          className={`btn-primary px-4 py-1.5 text-xs font-medium ${isOptimising ? 'opacity-50 cursor-not-allowed' : ''}`}
+        >
+          {isOptimising ? 'Optimising…' : 'Optimize Selection'}
+        </button>
+        <button
+          type="button"
+          onClick={onUse}
+          className="px-4 py-1.5 text-xs font-medium border border-border rounded hover:border-accent transition-colors"
+        >
+          {allPass ? 'Use This Section' : 'Use Anyway'}
+        </button>
+      </div>
+    </div>
+  )
+}
+
+function OptimisedCard({
+  result,
+  onConfirm,
+  onChange,
+}: {
+  result: OptimiseResult
+  onConfirm: () => void
+  onChange: () => void
+}) {
+  const { selected_section: sec, checks, optimisation_case, iterations, optimised } = result
+  const maxUR = Math.max(checks.UR_moment, checks.UR_deflection, checks.UR_shear)
+  const gradeLabel = (sec.fy_N_per_mm2 ?? 275) >= 355 ? 'S355' : 'S275'
+
+  return (
+    <div className="rounded border border-accent/40 bg-accent/5 p-4 space-y-3">
+      <div className="flex items-baseline justify-between">
+        <div>
+          <span className="font-mono font-semibold text-white text-base">UB {sec.designation}</span>
+          <span className="ml-2 text-muted text-sm">{gradeLabel} · {sec.mass_kg_per_m} kg/m</span>
+        </div>
+        <span className="text-xs text-accent font-medium">
+          Optimised {optimised ? '✓' : ''} (Case {optimisation_case} — {iterations} iter.)
+        </span>
+      </div>
+      <div className="grid grid-cols-3 gap-2 text-xs">
+        <div>
+          <p className="text-muted mb-0.5">UR moment</p>
+          <span className={checks.UR_moment < 1.0 ? 'text-green-400 font-mono' : 'text-red-400 font-mono'}>
+            {checks.UR_moment.toFixed(3)} {checks.UR_moment < 1.0 ? '✓' : '✗'}
+            {checks.UR_moment >= 0.95 && <span className="ml-1 text-accent">(≥0.95)</span>}
+          </span>
+        </div>
+        <div>
+          <p className="text-muted mb-0.5">UR deflection</p>
+          <span className={checks.UR_deflection < 1.0 ? 'text-green-400 font-mono' : 'text-red-400 font-mono'}>
+            {checks.UR_deflection.toFixed(3)} {checks.UR_deflection < 1.0 ? '✓' : '✗'}
+            {checks.UR_deflection >= 0.95 && <span className="ml-1 text-accent">(≥0.95)</span>}
+          </span>
+        </div>
+        <div>
+          <p className="text-muted mb-0.5">UR shear</p>
+          <span className={checks.UR_shear < 1.0 ? 'text-green-400 font-mono' : 'text-red-400 font-mono'}>
+            {checks.UR_shear.toFixed(3)} {checks.UR_shear < 1.0 ? '✓' : '✗'}
+            {checks.UR_shear >= 0.95 && <span className="ml-1 text-accent">(≥0.95)</span>}
+          </span>
+        </div>
+      </div>
+      <p className="text-xs text-muted">{result.message}</p>
+      <div className="flex gap-2 pt-1">
+        <button
+          type="button"
+          onClick={onConfirm}
+          className="btn-primary px-4 py-1.5 text-xs font-semibold"
+        >
+          Confirm Section
+        </button>
+        <button
+          type="button"
+          onClick={onChange}
+          className="px-4 py-1.5 text-xs font-medium border border-border rounded hover:border-accent transition-colors"
+        >
+          Change
+        </button>
+      </div>
+    </div>
+  )
+}
+
 function OverallBanner({ results }: { results: CalculationResults }) {
   const steelPass = results.steel.pass
   const foundationPass = results.foundation.pass
@@ -976,14 +1125,24 @@ export default function Step3() {
     project_info,
     design_parameters: dp,
     calculation_results,
+    confirmed_section,
     setDesignParameters,
     setCalculationResults,
+    setConfirmedSection,
     confirmStep3,
     step3_confirmed,
   } = useProjectStore()
 
   const [loading, setLoading] = useState(false)
   const [apiError, setApiError] = useState<string | null>(null)
+
+  // ── Section selection flow state ──
+  const [isSearching, setIsSearching] = useState(false)
+  const [isOptimising, setIsOptimising] = useState(false)
+  const [searchResult, setSearchResult] = useState<SelectionResult | null>(null)
+  const [optimiseResult, setOptimiseResult] = useState<OptimiseResult | null>(null)
+  const [searchError, setSearchError] = useState<string | null>(null)
+  const [sectionCleared, setSectionCleared] = useState(false)
 
   const set = (partial: Partial<DesignParameters>) => setDesignParameters(partial)
   const numericValue = (v: number | null | undefined) => (v == null ? '' : String(v))
@@ -1043,6 +1202,139 @@ export default function Step3() {
     })
   }
 
+  // Auto-clear confirmed section when key structural params change
+  const clearTrigger = `${dp.post_spacing}|${dp.post_length}|${dp.subframe_spacing}|${structureHeight}|${dp.return_period}`
+  useEffect(() => {
+    if (confirmed_section) {
+      setConfirmedSection(null)
+      setSearchResult(null)
+      setOptimiseResult(null)
+      setSectionCleared(true)
+    }
+  // Only fire on structural param changes, not on confirmed_section itself
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [clearTrigger])
+
+  const canSearch =
+    structureHeight != null &&
+    dp.post_spacing != null &&
+    dp.subframe_spacing != null &&
+    dp.post_length != null
+
+  async function handleFindSection() {
+    if (!canSearch) return
+    setIsSearching(true)
+    setSearchError(null)
+    setSearchResult(null)
+    setOptimiseResult(null)
+    setSectionCleared(false)
+    try {
+      const body = {
+        structure_height: structureHeight,
+        shelter_factor: dp.shelter_factor.override ?? (computedShelterFactor ?? dp.shelter_factor.calculated),
+        vb: dp.vb.override !== null ? dp.vb.effective : undefined,
+        return_period: dp.return_period,
+        cp_net: dp.cp_net ?? 1.2,
+        post_spacing: dp.post_spacing,
+        subframe_spacing: dp.subframe_spacing,
+        post_length: dp.post_length,
+        deflection_limit_n: dp.deflection_limit_n,
+        remarks: dp.remarks ?? '',
+      }
+      const res = await fetch('/api/select-section', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      })
+      if (!res.ok) {
+        const detail = await res.json().catch(() => null)
+        throw new Error(detail?.detail ?? `HTTP ${res.status}`)
+      }
+      const data = await res.json()
+      if (data.error && !data.designation) {
+        throw new Error(data.error)
+      }
+      // Map flat API response into SelectionResult
+      const w = data.w_kN_per_m ?? (body.structure_height * 0)  // will be computed
+      const L_mm = (dp.post_length ?? 0) * 1000
+      const Lcr_mm = (dp.subframe_spacing ?? 0) * 1000
+      const result: SelectionResult = {
+        section: {
+          designation: data.designation,
+          mass_kg_per_m: data.mass_kg_per_m,
+          h_mm: data.h_mm ?? 0,
+          b_mm: data.b_mm ?? 0,
+          tf_mm: data.tf_mm ?? 0,
+          tw_mm: data.tw_mm ?? 0,
+          r_mm: data.r_mm ?? 0,
+          Iy_cm4: data.Iy_cm4 ?? 0,
+          Iz_cm4: data.Iz_cm4 ?? 0,
+          Wpl_y_cm3: data.Wpl_y_cm3 ?? 0,
+          Wel_y_cm3: data.Wel_y_cm3 ?? 0,
+          Iw_dm6: data.Iw_dm6 ?? 0,
+          It_cm4: data.It_cm4 ?? 0,
+          fy_N_per_mm2: data.fy_N_per_mm2 ?? 275,
+        },
+        checks: {
+          UR_moment: data.UR_moment ?? 0,
+          UR_deflection: data.UR_deflection ?? 0,
+          UR_shear: data.UR_shear ?? 0,
+          pass: data.pass ?? false,
+        },
+        source: (data.source as SelectionResult['source']) ?? 'cache',
+        fallback_reason: data.fallback_reason ?? null,
+        all_sections: data.all_sections ?? [],
+        M_Ed_kNm: data.M_Ed_kNm ?? 0,
+        V_Ed_kN: data.V_Ed_kN ?? 0,
+        w_kN_per_m: data.w_kN_per_m ?? 0,
+        L_mm,
+        Lcr_mm,
+      }
+      setSearchResult(result)
+    } catch (e) {
+      setSearchError(e instanceof Error ? e.message : 'Section search failed')
+    } finally {
+      setIsSearching(false)
+    }
+  }
+
+  async function handleOptimise() {
+    if (!searchResult) return
+    setIsOptimising(true)
+    try {
+      const body = {
+        section: searchResult.section,
+        w_kN_per_m: searchResult.w_kN_per_m,
+        L_mm: searchResult.L_mm,
+        Lcr_mm: searchResult.Lcr_mm,
+        post_length_m: dp.post_length,
+        deflection_limit_n: dp.deflection_limit_n,
+        M_Ed_kNm: searchResult.M_Ed_kNm,
+        V_Ed_kN: searchResult.V_Ed_kN,
+      }
+      const res = await fetch('/api/optimize-section', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      })
+      if (!res.ok) {
+        const detail = await res.json().catch(() => null)
+        throw new Error(detail?.detail ?? `HTTP ${res.status}`)
+      }
+      const data: OptimiseResult = await res.json()
+      setOptimiseResult(data)
+    } catch (e) {
+      setSearchError(e instanceof Error ? e.message : 'Optimisation failed')
+    } finally {
+      setIsOptimising(false)
+    }
+  }
+
+  function handleConfirmSection(section: SteelSection) {
+    setConfirmedSection(section)
+    setSectionCleared(false)
+  }
+
   const canRun =
     structureHeight != null &&
     dp.post_spacing != null &&
@@ -1084,7 +1376,8 @@ export default function Step3() {
         post_weight_kN: dp.post_weight_kN ?? 6,
         cu_kPa: dp.cu_kPa ?? 0,
         cp_net: dp.cp_net ?? 1.2,
-        steel_grade: dp.steel_grade ?? 'S275',
+        remarks: dp.remarks ?? '',
+        pre_selected_section: confirmed_section ?? undefined,
       }
       const res = await fetch('/api/calculate', {
         method: 'POST',
@@ -1275,17 +1568,6 @@ export default function Step3() {
                 onChange={(e) => set({ deflection_limit_n: parseNum(e.target.value) ?? 65 })}
               />
             </Field>
-
-            <Field label="Steel grade" hint="S275 = standard (fy=275 N/mm²). S355 = higher strength (fy=355 N/mm²).">
-              <select
-                className="field-input"
-                value={dp.steel_grade ?? 'S275'}
-                onChange={(e) => set({ steel_grade: e.target.value as 'S275' | 'S355' })}
-              >
-                <option value="S275">S275 (fy = 275 N/mm²)</option>
-                <option value="S355">S355 (fy = 355 N/mm²)</option>
-              </select>
-            </Field>
           </FieldGroup>
 
           {/* ── Foundation ── */}
@@ -1407,6 +1689,95 @@ export default function Step3() {
               />
             </Field>
           </FieldGroup>
+
+          {/* ── Additional Considerations ── */}
+          <div className="panel space-y-2">
+            <p className="text-xs font-semibold uppercase tracking-widest text-muted">Additional Considerations</p>
+            <Field
+              label="Additional Considerations"
+              hint="Optional. Any site-specific conditions, PE instructions, or project requirements that should influence section selection."
+              span
+            >
+              <textarea
+                rows={3}
+                placeholder="e.g. Limited headroom — prefer shallower sections. Adjacent to sensitive receiver — minimise deflection."
+                className="w-full border border-border rounded px-3 py-2 text-sm bg-transparent text-foreground placeholder-muted/40 focus:outline-none focus:border-accent resize-none"
+                value={dp.remarks ?? ''}
+                onChange={(e) => set({ remarks: e.target.value })}
+              />
+            </Field>
+          </div>
+
+          {/* ── Section Selection Flow ── */}
+          <div className="panel space-y-4">
+            <p className="text-xs font-semibold uppercase tracking-widest text-muted">Section Selection</p>
+
+            {sectionCleared && !confirmed_section && (
+              <p className="text-xs text-warning/80 border border-warning/30 rounded px-3 py-2 bg-warning/5">
+                Section cleared — parameters changed. Re-select before running calculations.
+              </p>
+            )}
+
+            {/* Step A: Find Section */}
+            <div className="flex items-center gap-3">
+              <button
+                type="button"
+                onClick={handleFindSection}
+                disabled={!canSearch || isSearching}
+                className={`btn-primary px-5 py-2 text-sm font-semibold ${
+                  (!canSearch || isSearching) ? 'opacity-50 cursor-not-allowed' : ''
+                }`}
+              >
+                {isSearching ? 'Searching…' : 'Find Section'}
+              </button>
+              {!canSearch && (
+                <p className="text-xs text-muted">Fill wind + post fields to enable</p>
+              )}
+            </div>
+
+            {searchError && (
+              <div className="rounded border border-red-500/40 bg-red-500/10 px-3 py-2 text-xs text-red-400">
+                {searchError}
+              </div>
+            )}
+
+            {/* Search result card */}
+            {searchResult && !optimiseResult && (
+              <SectionCard
+                result={searchResult}
+                onOptimise={handleOptimise}
+                onUse={() => handleConfirmSection(searchResult.section)}
+                isOptimising={isOptimising}
+              />
+            )}
+
+            {/* Optimised result card */}
+            {optimiseResult && (
+              <OptimisedCard
+                result={optimiseResult}
+                onConfirm={() => handleConfirmSection(optimiseResult.selected_section)}
+                onChange={() => { setOptimiseResult(null); setSearchResult(null) }}
+              />
+            )}
+
+            {/* Confirmed banner */}
+            {confirmed_section && (
+              <div className="flex items-center gap-2 rounded border border-green-500/40 bg-green-500/10 px-4 py-2.5 text-sm text-green-400">
+                <span className="font-bold">✓</span>
+                <span>
+                  Section confirmed: <span className="font-mono font-semibold">UB {confirmed_section.designation}</span>
+                  {' '}({confirmed_section.fy_N_per_mm2 >= 355 ? 'S355' : 'S275'}, {confirmed_section.mass_kg_per_m} kg/m)
+                </span>
+                <button
+                  type="button"
+                  onClick={() => { setConfirmedSection(null); setSectionCleared(false) }}
+                  className="ml-auto text-xs text-muted hover:text-accent underline"
+                >
+                  Change
+                </button>
+              </div>
+            )}
+          </div>
 
           {/* ── Run button ── */}
           <div className="flex items-center gap-4">

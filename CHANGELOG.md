@@ -1,5 +1,117 @@
 # CHANGELOG
 
+## [0.15.2] — 2026-04-21
+### Changed
+- **Steel grade removed from user input** — grade is now determined autonomously
+  from the section returned by AI/library. `steel_grade` removed from
+  `DesignParameters`, `SelectSectionRequest`, `OptimizeSectionRequest`, and
+  `CalculateRequest`. `SteelGrade` type retained in `types/index.ts` for
+  potential future use.
+- `section_retrieval.py` `_verify_against_cache()`: no longer accepts `steel_grade`
+  param. Grade derived per-section from `fy_N_per_mm2` (>= 355 → S355, else S275).
+  Loads both `parts_library_S275.json` and `parts_library_S355.json` and routes
+  each section to its matching cache.
+- `section_retrieval.py` `select_section()`: `steel_grade` and `fy` params removed.
+  `wpl_min_cm3` computed with conservative `fy=275` default (larger threshold, more
+  candidates returned by Claude). Cache fallback now combines both grade libraries
+  sorted by mass ascending.
+- `select_section.py` router: `steel_grade` and `fy` removed from
+  `SelectSectionRequest`. `fy_N_per_mm2` added to `SelectSectionResponse` (sourced
+  from the returned section dict, used by frontend to derive grade label).
+- `optimize_section.py` router: `steel_grade` removed from `OptimizeSectionRequest`.
+  Grade derived from `body.section.get("fy_N_per_mm2", 275.0)` to select the
+  correct grade library for the optimisation loop.
+- `calculate.py` router: `steel_grade` removed from `CalculateRequest`. `fy`
+  derivation removed. `select_section()` called without grade arguments.
+- `Step3.tsx`: Steel grade dropdown removed from Post group. Grade is shown
+  informational-only in `SectionCard`, `OptimisedCard`, and confirmed banner — all
+  derived from `section.fy_N_per_mm2` at render time. `clearTrigger` no longer
+  includes `dp.steel_grade`.
+
+---
+
+## [0.15.1] — 2026-04-21
+### Added
+- `section_retrieval.py`: `_validate_section_dict()` — validates all required
+  numeric fields are present and within plausible engineering ranges before any
+  Claude-returned section reaches `_check_section()`. Checks: designation present;
+  mass 0–500 kg/m; h 50–1000 mm; b 50–500 mm; tf/tw 1–50 mm; Iy, Wpl_y, Wel_y
+  1–100000 cm⁴/cm³; fy 200–500 N/mm². Hallucinated or malformed sections are
+  dropped with a log message. If all returned sections fail validation, raises
+  `ValueError` which triggers the grade-library cache fallback with a clear reason.
+- `Step3.tsx`: steel grade hint updated — "S275 is standard for most projects.
+  S355 for heavily loaded or long-span configurations." Both options retained; no
+  other UI changes.
+
+---
+
+## [0.15.0] — 2026-04-21
+### Changed
+- `section_retrieval.py`: replaced Gemini + Playwright with Claude API web search
+  (`web_search_20250305` tool, model `claude-opus-4-5`). No browser or HTTP fetch
+  needed — Claude searches live and returns structured section JSON. Grade constrained
+  to S275/S355 in prompt (not exposed in UI). `remarks` field included in search
+  prompt when provided. Falls back to grade-specific library on any exception.
+- `parts_library.json` split into `parts_library_S275.json` (107 sections, fy=275)
+  and `parts_library_S355.json` (26 sections, fy=355). Grade-specific file selected
+  by `steel_grade` parameter. `parts_library.json` retained for backward compat with
+  `compute_steel_design()` fallback path.
+- `_verify_against_cache()`: now accepts `steel_grade` and loads the matching grade
+  file instead of the combined library.
+- `select_section()` service: now returns `all_sections` (full verified list from web
+  search) alongside the primary result — feeds the frontend optimisation flow.
+- `select_section.py` router: added `steel_grade` and `remarks` fields to request;
+  added `all_sections` to response; `cp_net` forwarded to wind calculation.
+- `calculate.py` (`CalculateRequest`): added `pre_selected_section: dict | None`
+  (skips AI retrieval when provided) and `remarks: str = ""` (stored, not used in
+  calculations). `pre_selected_section` runs `_check_section()` directly and is tagged
+  `source: "pre_selected"`.
+
+### Added
+- `POST /api/optimize-section` (`optimize_section.py`): deterministic optimisation
+  loop against the grade-specific library. Case A (fails): moves up (heavier) until
+  first all-pass. Case B (passes): moves down (lighter) until check fails or
+  max(UR) >= 0.95. Returns `selected_section`, `checks`, `optimisation_case`,
+  `iterations`, `optimised`, `message`. Registered in `main.py`.
+- `Step3.tsx`: Additional Considerations textarea (full-width, 3 rows) above the
+  section selection area. Bound to `dp.remarks`; included in Claude web search prompt.
+- `Step3.tsx`: Full Select → Show → Optimize → Confirm flow:
+  - **Find Section** button (enabled when wind + post filled) → calls
+    `/api/select-section`, shows `SectionCard` with UR checks.
+  - **Optimize Selection** button → calls `/api/optimize-section`, shows
+    `OptimisedCard` with case/iteration detail.
+  - **Confirm Section** → stores section in Zustand `confirmed_section`; shows green
+    confirmed banner.
+  - **Run Calculations** passes `confirmed_section` as `pre_selected_section`; skips
+    AI retrieval when set.
+  - Auto-clears confirmed section and shows warning when post_spacing, post_length,
+    subframe_spacing, structure_height, return_period, or steel_grade changes.
+- `types/index.ts`: `SteelSection`, `SectionChecks`, `SelectionResult`, `OptimiseResult`
+  interfaces added.
+- `types/index.ts` + `projectStore.ts`: `remarks: string` added to `DesignParameters`
+  / `defaultDesignParameters`.
+- `projectStore.ts`: `confirmed_section: SteelSection | null` state +
+  `setConfirmedSection()` action; cleared in `reset()`.
+
+### Removed
+- `google-genai` and `playwright` dependencies from `pyproject.toml`.
+- Playwright-based `_playwright_fetch_sync()`, `_fetch_page()` functions.
+- Gemini-based `_extract_sections_with_llm()` function.
+- `GOOGLE_API_KEY` startup warning (replaced by `ANTHROPIC_API_KEY` warning).
+
+### Notes
+- `ANTHROPIC_API_KEY` must be set in `backend/.env` for live section retrieval.
+  Without it, endpoint falls back to grade-specific library immediately.
+- Grade constraint (S275/S355 only) is in the Claude prompt — not exposed in UI.
+  Expandable to other grades later without frontend changes.
+- Additional Considerations influences search only for now. Scope can expand to
+  PDF report in a future version.
+- Optimisation is pure Python — no LLM in the optimise loop.
+- P105 T2 validated: M_Ed=130.31 kNm ✓, UB 406×140×39, UR_moment=0.977 ✓,
+  Case B (1 iteration), optimised (UR ≥ 0.95) ✓.
+
+---
+
 ## [0.14.0] — 2026-04-20
 ### Added
 - `backend/app/data/chs_library.json` — 51 CHS GI pipe sections from EN 10219, all with `fy_N_per_mm2: 400`, sorted ascending by `mass_kg_per_m`. Used by subframe selection.

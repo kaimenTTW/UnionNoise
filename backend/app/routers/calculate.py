@@ -90,10 +90,17 @@ class CalculateRequest(BaseModel):
                     "Use 1.3 for solid panels — confirm with PE."
     )
 
-    # Steel grade
-    steel_grade: str = Field(
-        "S275",
-        description="Steel grade. S275 → fy=275 N/mm². S355 → fy=355 N/mm²."
+    # Pre-confirmed section (from Select → Optimize → Confirm flow in Step 3)
+    pre_selected_section: dict | None = Field(
+        None,
+        description="Pre-confirmed UB section dict from the section selection flow. "
+                    "When provided, skips AI retrieval and uses this section directly."
+    )
+
+    # Additional considerations (stored for future report use; not used in calculations)
+    remarks: str = Field(
+        "",
+        description="Optional engineer notes / additional considerations. Stored for PE report."
     )
 
 
@@ -245,25 +252,46 @@ async def calculate(body: CalculateRequest) -> CalculateResponse:
 
     wind_result = WindResult(**wind_raw)
 
-    # ── 2. Steel section selection (live retrieval → parts_library fallback) ──
+    # ── 2. Steel section selection ──
+    # When a pre-confirmed section is provided (from Select→Optimize→Confirm flow),
+    # skip AI retrieval and run _check_section() directly on that section.
     try:
+        from app.calculation.steel import _check_section
+
         w_kN_per_m = wind_raw["design_pressure_kPa"] * body.post_spacing
         L_mm = body.post_length * 1000
         M_Ed_kNm = 1.5 * w_kN_per_m * body.post_length ** 2 / 2
         V_Ed_kN = 1.5 * w_kN_per_m * body.post_length
         Lcr_mm = body.subframe_spacing * 1000
 
-        fy = 275.0 if body.steel_grade == "S275" else 355.0
-        steel_raw = await select_section(
-            M_Ed_kNm=M_Ed_kNm,
-            V_Ed_kN=V_Ed_kN,
-            w_kN_per_m=w_kN_per_m,
-            L_mm=L_mm,
-            Lcr_mm=Lcr_mm,
-            post_length_m=body.post_length,
-            deflection_limit_n=body.deflection_limit_n,
-            fy=fy,
-        )
+        if body.pre_selected_section:
+            # Use the pre-confirmed section directly
+            steel_raw = _check_section(
+                sec=body.pre_selected_section,
+                M_Ed_kNm=M_Ed_kNm,
+                V_Ed_kN=V_Ed_kN,
+                w_kN_per_m=w_kN_per_m,
+                L_mm=L_mm,
+                Lcr_mm=Lcr_mm,
+                post_length_m=body.post_length,
+                deflection_limit_n=body.deflection_limit_n,
+            )
+            steel_raw = {
+                **steel_raw,
+                "source": "pre_selected",
+                "fallback_reason": None,
+            }
+        else:
+            steel_raw = await select_section(
+                M_Ed_kNm=M_Ed_kNm,
+                V_Ed_kN=V_Ed_kN,
+                w_kN_per_m=w_kN_per_m,
+                L_mm=L_mm,
+                Lcr_mm=Lcr_mm,
+                post_length_m=body.post_length,
+                deflection_limit_n=body.deflection_limit_n,
+                remarks=body.remarks,
+            )
     except Exception as exc:
         raise HTTPException(status_code=422, detail=f"Steel calculation failed: {exc}") from exc
 

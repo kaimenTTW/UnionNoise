@@ -84,8 +84,6 @@ export interface DesignParameters {
   // ── Materials ──
   /** Concrete grade — default C25/30 per PE reports. */
   concrete_grade: ConcreteGrade     // default 'C25/30'
-  /** Steel grade — default S275 per PE reports. */
-  steel_grade: SteelGrade           // default 'S275'
   /** Rebar grade */
   rebar_grade: RebarGrade           // default 'B500B'
   /** Bolt grade */
@@ -121,6 +119,61 @@ export interface DesignParameters {
   cu_kPa: number                    // default 0
   /** Net pressure coefficient cp,net. 1.2 = porous TNCB panels (default). 1.3 = solid panels. */
   cp_net: number                    // default 1.2
+  /** Optional additional considerations for section search and PE report. */
+  remarks: string                   // default ""
+}
+
+// ─── Steel section (from parts library or web search) ────────────────────────
+
+export interface SteelSection {
+  designation: string
+  mass_kg_per_m: number
+  h_mm: number
+  b_mm: number
+  tf_mm: number
+  tw_mm: number
+  r_mm: number
+  Iy_cm4: number
+  Iz_cm4: number
+  Wpl_y_cm3: number
+  Wel_y_cm3: number
+  Iw_dm6: number
+  It_cm4: number
+  fy_N_per_mm2: number
+}
+
+// ─── Section selection result (from POST /api/select-section) ────────────────
+
+export interface SectionChecks {
+  UR_moment: number
+  UR_deflection: number
+  UR_shear: number
+  pass: boolean
+}
+
+export interface SelectionResult {
+  section: SteelSection
+  checks: SectionChecks
+  source: 'live' | 'cache' | 'pre_selected'
+  fallback_reason?: string | null
+  all_sections?: SteelSection[]
+  // Demand values — needed to pass to optimize endpoint
+  M_Ed_kNm: number
+  V_Ed_kN: number
+  w_kN_per_m: number
+  L_mm: number
+  Lcr_mm: number
+}
+
+// ─── Optimise result (from POST /api/optimize-section) ───────────────────────
+
+export interface OptimiseResult {
+  selected_section: SteelSection
+  checks: SectionChecks
+  optimisation_case: 'A' | 'B'
+  iterations: number
+  optimised: boolean
+  message: string
 }
 
 // ─── Calculation results (returned from POST /api/calculate) ─────────────────

@@ -103,6 +103,7 @@ def _check_section(
     return {
         "designation": sec["designation"],
         "mass_kg_per_m": sec["mass_kg_per_m"],
+        "fy_N_per_mm2": fy,
         "w_kN_per_m": round(w_kN_per_m, 4),
         "M_Ed_kNm": round(M_Ed_kNm, 2),
         "V_Ed_kN": round(V_Ed_kN, 2),
