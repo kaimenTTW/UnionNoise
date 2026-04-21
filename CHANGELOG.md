@@ -1,5 +1,43 @@
 # CHANGELOG
 
+## [0.15.4] — 2026-04-21
+### Fixed
+- **Step3.tsx**: DA1-C2 undrained bearing results now displayed in the derivation
+  panel when `cu_kPa > 0`. Was only showing DA1-C1 undrained rows (`bru = c1.bearing_undrained`).
+  Both combinations now render undrained qu, q_applied, UR, and `bearing_governs` when
+  `bearing_undrained` is present in the response. Existing DA1-C1 labels updated to
+  include the `(DA1-C1)` suffix for clarity alongside the new DA1-C2 rows.
+
+## [0.15.3] — 2026-04-21
+### Changed
+- **Step 3 — single-entry Run Calculations**: Removed the separate "Find Section"
+  button. "Run Calculations" is now the sole entry point. First click runs Phase 1
+  (wind + section search via Claude web retrieval). Second click (after engineer
+  confirms a section) runs Phase 2 (foundation, connection, subframe, lifting).
+- **`calculate.py`**: Web search is disabled for Phase 2. `CalculateRequest` adds
+  `use_retrieval: bool = False`; `pre_selected_section` is always provided in the
+  normal flow, so the retrieval path is never reached. No double-search possible.
+- **`section_retrieval.py`**: `select_section()` accepts `use_retrieval: bool = True`.
+  When `False`, skips Claude API entirely and falls through to library cache.
+
+### Added
+- **`POST /api/wind-and-select`** — new endpoint that runs wind calculation and
+  section search together in one call. Used exclusively by Phase 1. Returns
+  `{ wind_result, section_result }` including demand values (M_Ed, V_Ed, w, L_mm,
+  Lcr_mm) needed by the optimize endpoint.
+- **`Phase1Result` interface** in `types/index.ts` — wraps `WindCalcResult` and
+  `SelectionResult`. Stored in Zustand so the section card survives tab navigation.
+- **`phase1_result` / `setPhase1Result`** added to `projectStore.ts`.
+- **"Change Section" button** — appears in the confirmed-section banner; clears
+  `confirmed_section`, `phase1_result`, and `calculation_results` to restart Phase 1.
+
+### Notes
+- If `confirmed_section` is already set when "Run Calculations" is clicked, the app
+  goes straight to Phase 2 without re-running the section search.
+- "Optimize Selection" remains available between Phase 1 and Phase 2 as before.
+- Web search (Claude retrieval) is only ever called from `/api/wind-and-select`,
+  never from `/api/calculate`.
+
 ## [0.15.2] — 2026-04-21
 ### Changed
 - **Steel grade removed from user input** — grade is now determined autonomously

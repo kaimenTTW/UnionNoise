@@ -10,9 +10,11 @@ import type {
   LiftingCalcResult,
   OptimiseResult,
   OverridableValue,
+  Phase1Result,
   SelectionResult,
   SteelSection,
   SubframeCalcResult,
+  WindCalcResult,
 } from '../types'
 
 // ─── Shelter factor lookup — EN 1991-1-4 Figure 7.20 ─────────────────────────
@@ -408,6 +410,7 @@ function buildSteelRows(steel: CalculationResults['steel']): DerivationRow[] {
 
 function buildFoundationRows(foundation: CalculationResults['foundation']): DerivationRow[] {
   const c1 = foundation.DA1_C1
+  const c2 = foundation.DA1_C2
   const rows: DerivationRow[] = [
     {
       label: 'Factored H (DA1-C1)',
@@ -475,16 +478,31 @@ function buildFoundationRows(foundation: CalculationResults['foundation']): Deri
   const bru = c1.bearing_undrained
   if (bru?.qu_kPa != null && bru?.q_applied_kPa != null) {
     rows.push(
-      { label: 'qu (undrained)', expr: `(π+2)×cu,d×bc×ic×sc + q`, result: `${bru.qu_kPa.toFixed(2)} kPa`, clause: 'EC7 Ann. D.3' },
+      { label: 'qu (undrained, DA1-C1)', expr: `(π+2)×cu,d×bc×ic×sc + q`, result: `${bru.qu_kPa.toFixed(2)} kPa`, clause: 'EC7 Ann. D.3' },
       { label: 'Applied bearing', expr: `q = P_G / (B' × L)`, result: `${bru.q_applied_kPa.toFixed(2)} kPa` },
     )
     if (bru.UR_bearing != null) {
-      rows.push({ label: 'Bearing UR (undrained)', expr: `q_applied / qu`, result: `${bru.UR_bearing.toFixed(3)}` })
+      rows.push({ label: 'Bearing UR (undrained, DA1-C1)', expr: `q_applied / qu`, result: `${bru.UR_bearing.toFixed(3)}` })
     }
   }
 
   if (c1.bearing_governs) {
-    rows.push({ label: 'Governing check', result: c1.bearing_governs })
+    rows.push({ label: 'Governing check (DA1-C1)', result: c1.bearing_governs })
+  }
+
+  const bru2 = c2.bearing_undrained
+  if (bru2?.qu_kPa != null && bru2?.q_applied_kPa != null) {
+    rows.push(
+      { label: 'qu (undrained, DA1-C2)', expr: `(π+2)×cu,d×bc×ic×sc + q`, result: `${bru2.qu_kPa.toFixed(2)} kPa`, clause: 'EC7 Ann. D.3' },
+      { label: 'Applied bearing', expr: `q = P_G / (B' × L)`, result: `${bru2.q_applied_kPa.toFixed(2)} kPa` },
+    )
+    if (bru2.UR_bearing != null) {
+      rows.push({ label: 'Bearing UR (undrained, DA1-C2)', expr: `q_applied / qu`, result: `${bru2.UR_bearing.toFixed(3)}` })
+    }
+  }
+
+  if (c2.bearing_governs) {
+    rows.push({ label: 'Governing check (DA1-C2)', result: c2.bearing_governs })
   }
 
   return rows
@@ -947,13 +965,15 @@ function LiftingPanel({ lift }: { lift: LiftingCalcResult }) {
 function SectionCard({
   result,
   onOptimise,
-  onUse,
+  onConfirmAndContinue,
   isOptimising,
+  isPhase2Loading,
 }: {
   result: SelectionResult
   onOptimise: () => void
-  onUse: () => void
+  onConfirmAndContinue: () => void
   isOptimising: boolean
+  isPhase2Loading: boolean
 }) {
   const { section, checks, source, fallback_reason } = result
   const allPass = checks.pass
@@ -1003,17 +1023,18 @@ function SectionCard({
         <button
           type="button"
           onClick={onOptimise}
-          disabled={isOptimising}
-          className={`btn-primary px-4 py-1.5 text-xs font-medium ${isOptimising ? 'opacity-50 cursor-not-allowed' : ''}`}
+          disabled={isOptimising || isPhase2Loading}
+          className={`btn-primary px-4 py-1.5 text-xs font-medium ${(isOptimising || isPhase2Loading) ? 'opacity-50 cursor-not-allowed' : ''}`}
         >
           {isOptimising ? 'Optimising…' : 'Optimize Selection'}
         </button>
         <button
           type="button"
-          onClick={onUse}
-          className="px-4 py-1.5 text-xs font-medium border border-border rounded hover:border-accent transition-colors"
+          onClick={onConfirmAndContinue}
+          disabled={isPhase2Loading}
+          className={`px-4 py-1.5 text-xs font-medium border border-border rounded hover:border-accent transition-colors ${isPhase2Loading ? 'opacity-50 cursor-not-allowed' : ''}`}
         >
-          {allPass ? 'Use This Section' : 'Use Anyway'}
+          {isPhase2Loading ? 'Calculating…' : 'Confirm & Continue →'}
         </button>
       </div>
     </div>
@@ -1024,10 +1045,12 @@ function OptimisedCard({
   result,
   onConfirm,
   onChange,
+  isPhase2Loading,
 }: {
   result: OptimiseResult
   onConfirm: () => void
   onChange: () => void
+  isPhase2Loading: boolean
 }) {
   const { selected_section: sec, checks, optimisation_case, iterations, optimised } = result
   const maxUR = Math.max(checks.UR_moment, checks.UR_deflection, checks.UR_shear)
@@ -1072,14 +1095,16 @@ function OptimisedCard({
         <button
           type="button"
           onClick={onConfirm}
-          className="btn-primary px-4 py-1.5 text-xs font-semibold"
+          disabled={isPhase2Loading}
+          className={`btn-primary px-4 py-1.5 text-xs font-semibold ${isPhase2Loading ? 'opacity-50 cursor-not-allowed' : ''}`}
         >
-          Confirm Section
+          {isPhase2Loading ? 'Calculating…' : 'Confirm & Continue →'}
         </button>
         <button
           type="button"
           onClick={onChange}
-          className="px-4 py-1.5 text-xs font-medium border border-border rounded hover:border-accent transition-colors"
+          disabled={isPhase2Loading}
+          className={`px-4 py-1.5 text-xs font-medium border border-border rounded hover:border-accent transition-colors ${isPhase2Loading ? 'opacity-50 cursor-not-allowed' : ''}`}
         >
           Change
         </button>
@@ -1125,23 +1150,23 @@ export default function Step3() {
     project_info,
     design_parameters: dp,
     calculation_results,
+    phase1_result,
     confirmed_section,
     setDesignParameters,
     setCalculationResults,
+    setPhase1Result,
     setConfirmedSection,
     confirmStep3,
     step3_confirmed,
   } = useProjectStore()
 
-  const [loading, setLoading] = useState(false)
+  const [phase1Loading, setPhase1Loading] = useState(false)
+  const [phase2Loading, setPhase2Loading] = useState(false)
   const [apiError, setApiError] = useState<string | null>(null)
 
   // ── Section selection flow state ──
-  const [isSearching, setIsSearching] = useState(false)
   const [isOptimising, setIsOptimising] = useState(false)
-  const [searchResult, setSearchResult] = useState<SelectionResult | null>(null)
   const [optimiseResult, setOptimiseResult] = useState<OptimiseResult | null>(null)
-  const [searchError, setSearchError] = useState<string | null>(null)
   const [sectionCleared, setSectionCleared] = useState(false)
 
   const set = (partial: Partial<DesignParameters>) => setDesignParameters(partial)
@@ -1202,167 +1227,133 @@ export default function Step3() {
     })
   }
 
-  // Auto-clear confirmed section when key structural params change
-  const clearTrigger = `${dp.post_spacing}|${dp.post_length}|${dp.subframe_spacing}|${structureHeight}|${dp.return_period}`
+  // Auto-clear Phase 1 + Phase 2 results when wind/post params change.
+  // Foundation param changes deliberately excluded — they don't affect Phase 1.
+  const clearTrigger = `${dp.post_spacing}|${dp.post_length}|${dp.subframe_spacing}|${structureHeight}|${dp.return_period}|${dp.vb.effective}|${dp.shelter_factor.effective}|${dp.cp_net}`
   useEffect(() => {
-    if (confirmed_section) {
+    if (confirmed_section || phase1_result || calculation_results) {
       setConfirmedSection(null)
-      setSearchResult(null)
+      setPhase1Result(null)
+      setCalculationResults(null)
       setOptimiseResult(null)
       setSectionCleared(true)
     }
-  // Only fire on structural param changes, not on confirmed_section itself
+  // Only fire on structural param changes, not on the results themselves
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [clearTrigger])
 
-  const canSearch =
+  // Phase 1 enabled when wind + post fields are filled (no foundation needed yet)
+  const canPhase1 =
     structureHeight != null &&
     dp.post_spacing != null &&
     dp.subframe_spacing != null &&
     dp.post_length != null
 
-  async function handleFindSection() {
-    if (!canSearch) return
-    setIsSearching(true)
-    setSearchError(null)
-    setSearchResult(null)
-    setOptimiseResult(null)
-    setSectionCleared(false)
-    try {
-      const body = {
-        structure_height: structureHeight,
-        shelter_factor: dp.shelter_factor.override ?? (computedShelterFactor ?? dp.shelter_factor.calculated),
-        vb: dp.vb.override !== null ? dp.vb.effective : undefined,
-        return_period: dp.return_period,
-        cp_net: dp.cp_net ?? 1.2,
-        post_spacing: dp.post_spacing,
-        subframe_spacing: dp.subframe_spacing,
-        post_length: dp.post_length,
-        deflection_limit_n: dp.deflection_limit_n,
-        remarks: dp.remarks ?? '',
-      }
-      const res = await fetch('/api/select-section', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body),
-      })
-      if (!res.ok) {
-        const detail = await res.json().catch(() => null)
-        throw new Error(detail?.detail ?? `HTTP ${res.status}`)
-      }
-      const data = await res.json()
-      if (data.error && !data.designation) {
-        throw new Error(data.error)
-      }
-      // Map flat API response into SelectionResult
-      const w = data.w_kN_per_m ?? (body.structure_height * 0)  // will be computed
-      const L_mm = (dp.post_length ?? 0) * 1000
-      const Lcr_mm = (dp.subframe_spacing ?? 0) * 1000
-      const result: SelectionResult = {
-        section: {
-          designation: data.designation,
-          mass_kg_per_m: data.mass_kg_per_m,
-          h_mm: data.h_mm ?? 0,
-          b_mm: data.b_mm ?? 0,
-          tf_mm: data.tf_mm ?? 0,
-          tw_mm: data.tw_mm ?? 0,
-          r_mm: data.r_mm ?? 0,
-          Iy_cm4: data.Iy_cm4 ?? 0,
-          Iz_cm4: data.Iz_cm4 ?? 0,
-          Wpl_y_cm3: data.Wpl_y_cm3 ?? 0,
-          Wel_y_cm3: data.Wel_y_cm3 ?? 0,
-          Iw_dm6: data.Iw_dm6 ?? 0,
-          It_cm4: data.It_cm4 ?? 0,
-          fy_N_per_mm2: data.fy_N_per_mm2 ?? 275,
-        },
-        checks: {
-          UR_moment: data.UR_moment ?? 0,
-          UR_deflection: data.UR_deflection ?? 0,
-          UR_shear: data.UR_shear ?? 0,
-          pass: data.pass ?? false,
-        },
-        source: (data.source as SelectionResult['source']) ?? 'cache',
-        fallback_reason: data.fallback_reason ?? null,
-        all_sections: data.all_sections ?? [],
-        M_Ed_kNm: data.M_Ed_kNm ?? 0,
-        V_Ed_kN: data.V_Ed_kN ?? 0,
-        w_kN_per_m: data.w_kN_per_m ?? 0,
-        L_mm,
-        Lcr_mm,
-      }
-      setSearchResult(result)
-    } catch (e) {
-      setSearchError(e instanceof Error ? e.message : 'Section search failed')
-    } finally {
-      setIsSearching(false)
-    }
-  }
-
-  async function handleOptimise() {
-    if (!searchResult) return
-    setIsOptimising(true)
-    try {
-      const body = {
-        section: searchResult.section,
-        w_kN_per_m: searchResult.w_kN_per_m,
-        L_mm: searchResult.L_mm,
-        Lcr_mm: searchResult.Lcr_mm,
-        post_length_m: dp.post_length,
-        deflection_limit_n: dp.deflection_limit_n,
-        M_Ed_kNm: searchResult.M_Ed_kNm,
-        V_Ed_kN: searchResult.V_Ed_kN,
-      }
-      const res = await fetch('/api/optimize-section', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body),
-      })
-      if (!res.ok) {
-        const detail = await res.json().catch(() => null)
-        throw new Error(detail?.detail ?? `HTTP ${res.status}`)
-      }
-      const data: OptimiseResult = await res.json()
-      setOptimiseResult(data)
-    } catch (e) {
-      setSearchError(e instanceof Error ? e.message : 'Optimisation failed')
-    } finally {
-      setIsOptimising(false)
-    }
-  }
-
-  function handleConfirmSection(section: SteelSection) {
-    setConfirmedSection(section)
-    setSectionCleared(false)
-  }
-
+  // Phase 2 enabled when all fields are filled (foundation required)
   const canRun =
-    structureHeight != null &&
-    dp.post_spacing != null &&
-    dp.subframe_spacing != null &&
-    dp.post_length != null &&
+    canPhase1 &&
     dp.footing_type != null &&
     dp.footing_B_m != null &&
     dp.footing_L_m != null &&
     dp.footing_D_m != null &&
     dp.vertical_load_G_kN != null
 
-  async function handleRunCalculations() {
+  // Shared wind+post body used by both phases
+  function windPostBody() {
+    return {
+      structure_height: structureHeight,
+      shelter_factor: dp.shelter_factor.override ?? (computedShelterFactor ?? dp.shelter_factor.calculated),
+      vb: dp.vb.override !== null ? dp.vb.effective : undefined,
+      return_period: dp.return_period,
+      cp_net: dp.cp_net ?? 1.2,
+      post_spacing: dp.post_spacing,
+      subframe_spacing: dp.subframe_spacing,
+      post_length: dp.post_length,
+      deflection_limit_n: dp.deflection_limit_n,
+      remarks: dp.remarks ?? '',
+    }
+  }
+
+  // Map the flat section_result dict from the API into a SelectionResult
+  function mapSectionResult(raw: Record<string, unknown>): SelectionResult {
+    const L_mm = (dp.post_length ?? 0) * 1000
+    const Lcr_mm = (dp.subframe_spacing ?? 0) * 1000
+    return {
+      section: {
+        designation: raw.designation as string,
+        mass_kg_per_m: raw.mass_kg_per_m as number,
+        h_mm: (raw.h_mm as number) ?? 0,
+        b_mm: (raw.b_mm as number) ?? 0,
+        tf_mm: (raw.tf_mm as number) ?? 0,
+        tw_mm: (raw.tw_mm as number) ?? 0,
+        r_mm: (raw.r_mm as number) ?? 0,
+        Iy_cm4: (raw.Iy_cm4 as number) ?? 0,
+        Iz_cm4: (raw.Iz_cm4 as number) ?? 0,
+        Wpl_y_cm3: (raw.Wpl_y_cm3 as number) ?? 0,
+        Wel_y_cm3: (raw.Wel_y_cm3 as number) ?? 0,
+        Iw_dm6: (raw.Iw_dm6 as number) ?? 0,
+        It_cm4: (raw.It_cm4 as number) ?? 0,
+        fy_N_per_mm2: (raw.fy_N_per_mm2 as number) ?? 275,
+      },
+      checks: {
+        UR_moment: (raw.UR_moment as number) ?? 0,
+        UR_deflection: (raw.UR_deflection as number) ?? 0,
+        UR_shear: (raw.UR_shear as number) ?? 0,
+        pass: (raw.pass as boolean) ?? false,
+      },
+      source: (raw.source as SelectionResult['source']) ?? 'cache',
+      fallback_reason: (raw.fallback_reason as string | null) ?? null,
+      all_sections: (raw.all_sections as SteelSection[]) ?? [],
+      M_Ed_kNm: (raw.M_Ed_kNm as number) ?? 0,
+      V_Ed_kN: (raw.V_Ed_kN as number) ?? 0,
+      w_kN_per_m: (raw.w_kN_per_m as number) ?? 0,
+      L_mm: (raw.L_mm as number) ?? L_mm,
+      Lcr_mm: (raw.Lcr_mm as number) ?? Lcr_mm,
+    }
+  }
+
+  // Phase 1 — wind + section search
+  async function handleRunPhase1() {
+    if (!canPhase1) return
+    setPhase1Loading(true)
+    setApiError(null)
+    setOptimiseResult(null)
+    setSectionCleared(false)
+    try {
+      const res = await fetch('/api/wind-and-select', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(windPostBody()),
+      })
+      if (!res.ok) {
+        const detail = await res.json().catch(() => null)
+        throw new Error(detail?.detail ?? `HTTP ${res.status}`)
+      }
+      const data = await res.json()
+      if (data.section_result?.error && !data.section_result?.designation) {
+        throw new Error(data.section_result.error)
+      }
+      const phase1: Phase1Result = {
+        wind_result: data.wind_result as WindCalcResult,
+        section_result: mapSectionResult(data.section_result),
+      }
+      setPhase1Result(phase1)
+    } catch (e) {
+      setApiError(e instanceof Error ? e.message : 'Phase 1 failed')
+    } finally {
+      setPhase1Loading(false)
+    }
+  }
+
+  // Phase 2 — full calculation chain using confirmed section
+  async function handleRunPhase2(section: SteelSection) {
     if (!canRun) return
-    setLoading(true)
+    setConfirmedSection(section)
+    setPhase2Loading(true)
     setApiError(null)
     try {
       const body = {
-        structure_height: structureHeight,
-        // Effective ψs — respects any engineer override.
-        // Uses computedShelterFactor directly (not the store) to avoid any sync lag.
-        shelter_factor: dp.shelter_factor.override ?? (computedShelterFactor ?? dp.shelter_factor.calculated),
-        // Send vb only when overridden — backend defaults to SG NA 20 m/s when omitted.
-        vb: dp.vb.override !== null ? dp.vb.effective : undefined,
-        return_period: dp.return_period,
-        post_spacing: dp.post_spacing,
-        subframe_spacing: dp.subframe_spacing,
-        post_length: dp.post_length,
-        deflection_limit_n: dp.deflection_limit_n,
+        ...windPostBody(),
         footing_type: dp.footing_type,
         fck: dp.fck ?? 25,
         phi_k: dp.phi_k,
@@ -1375,9 +1366,8 @@ export default function Step3() {
         vertical_load_G_kN: dp.vertical_load_G_kN,
         post_weight_kN: dp.post_weight_kN ?? 6,
         cu_kPa: dp.cu_kPa ?? 0,
-        cp_net: dp.cp_net ?? 1.2,
-        remarks: dp.remarks ?? '',
-        pre_selected_section: confirmed_section ?? undefined,
+        pre_selected_section: section,
+        // use_retrieval defaults to false on the backend — no web search in Phase 2
       }
       const res = await fetch('/api/calculate', {
         method: 'POST',
@@ -1391,14 +1381,59 @@ export default function Step3() {
       const data: CalculationResults = await res.json()
       setCalculationResults(data)
     } catch (e) {
-      setApiError(e instanceof Error ? e.message : 'Calculation failed')
+      setApiError(e instanceof Error ? e.message : 'Phase 2 failed')
     } finally {
-      setLoading(false)
+      setPhase2Loading(false)
+    }
+  }
+
+  // Clear everything and return to initial state so engineer can restart Phase 1
+  function handleChangeSection() {
+    setConfirmedSection(null)
+    setPhase1Result(null)
+    setCalculationResults(null)
+    setOptimiseResult(null)
+    setSectionCleared(false)
+  }
+
+  async function handleOptimise() {
+    const sr = phase1_result?.section_result
+    if (!sr) return
+    setIsOptimising(true)
+    try {
+      const body = {
+        section: sr.section,
+        w_kN_per_m: sr.w_kN_per_m,
+        L_mm: sr.L_mm,
+        Lcr_mm: sr.Lcr_mm,
+        post_length_m: dp.post_length,
+        deflection_limit_n: dp.deflection_limit_n,
+        M_Ed_kNm: sr.M_Ed_kNm,
+        V_Ed_kN: sr.V_Ed_kN,
+      }
+      const res = await fetch('/api/optimize-section', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      })
+      if (!res.ok) {
+        const detail = await res.json().catch(() => null)
+        throw new Error(detail?.detail ?? `HTTP ${res.status}`)
+      }
+      const data: OptimiseResult = await res.json()
+      setOptimiseResult(data)
+    } catch (e) {
+      setApiError(e instanceof Error ? e.message : 'Optimisation failed')
+    } finally {
+      setIsOptimising(false)
     }
   }
 
   const vbOverridden = dp.vb.override !== null
   const shelterOverridden = dp.shelter_factor.override !== null
+  const phase1Complete = phase1_result != null
+  // Wind results available from Phase 1 onwards; Phase 2 wind overrides with same values
+  const windResult: WindCalcResult | null = (calculation_results?.wind ?? phase1_result?.wind_result) ?? null
 
   return (
     <div className="flex h-full flex-col">
@@ -1708,59 +1743,80 @@ export default function Step3() {
             </Field>
           </div>
 
-          {/* ── Section Selection Flow ── */}
+          {/* ── Section Selection ── */}
           <div className="panel space-y-4">
             <p className="text-xs font-semibold uppercase tracking-widest text-muted">Section Selection</p>
 
-            {sectionCleared && !confirmed_section && (
+            {sectionCleared && !phase1Complete && !confirmed_section && (
               <p className="text-xs text-warning/80 border border-warning/30 rounded px-3 py-2 bg-warning/5">
-                Section cleared — parameters changed. Re-select before running calculations.
+                Parameters changed — results cleared. Click Run Calculations to re-run.
               </p>
             )}
 
-            {/* Step A: Find Section */}
-            <div className="flex items-center gap-3">
-              <button
-                type="button"
-                onClick={handleFindSection}
-                disabled={!canSearch || isSearching}
-                className={`btn-primary px-5 py-2 text-sm font-semibold ${
-                  (!canSearch || isSearching) ? 'opacity-50 cursor-not-allowed' : ''
-                }`}
-              >
-                {isSearching ? 'Searching…' : 'Find Section'}
-              </button>
-              {!canSearch && (
-                <p className="text-xs text-muted">Fill wind + post fields to enable</p>
-              )}
-            </div>
-
-            {searchError && (
-              <div className="rounded border border-red-500/40 bg-red-500/10 px-3 py-2 text-xs text-red-400">
-                {searchError}
+            {/* Re-run banner: confirmed section exists but Phase 1 not shown (returned from Step 4) */}
+            {confirmed_section && !phase1Complete && (
+              <div className="flex items-center gap-2 rounded border border-accent/30 bg-accent/5 px-4 py-2.5 text-sm text-accent">
+                <span>Using confirmed section: <span className="font-mono font-semibold">UB {confirmed_section.designation}</span></span>
+                <button
+                  type="button"
+                  onClick={handleChangeSection}
+                  className="ml-auto text-xs text-muted hover:text-accent underline"
+                >
+                  Change Section to re-select
+                </button>
               </div>
             )}
 
-            {/* Search result card */}
-            {searchResult && !optimiseResult && (
+            {/* Run Calculations button — shown when no Phase 1 result, or when confirmed section (re-run) */}
+            {(!phase1Complete || confirmed_section != null) && (
+              <div className="flex items-center gap-3">
+                <button
+                  type="button"
+                  onClick={confirmed_section ? () => handleRunPhase2(confirmed_section) : handleRunPhase1}
+                  disabled={confirmed_section ? (!canRun || phase2Loading) : (!canPhase1 || phase1Loading)}
+                  className={`btn-primary px-5 py-2 text-sm font-semibold ${
+                    (confirmed_section ? (!canRun || phase2Loading) : (!canPhase1 || phase1Loading))
+                      ? 'opacity-50 cursor-not-allowed' : ''
+                  }`}
+                >
+                  {phase1Loading ? 'Searching…' : phase2Loading ? 'Calculating…' : 'Run Calculations'}
+                </button>
+                {!confirmed_section && !canPhase1 && (
+                  <p className="text-xs text-muted">Fill wind + post fields to enable</p>
+                )}
+                {confirmed_section && !canRun && (
+                  <p className="text-xs text-muted">Fill all required fields to enable</p>
+                )}
+              </div>
+            )}
+
+            {apiError && (
+              <div className="rounded border border-red-500/40 bg-red-500/10 px-3 py-2 text-xs text-red-400">
+                <strong>Error:</strong> {apiError}
+              </div>
+            )}
+
+            {/* Phase 1 section card — shown after search, before confirmation */}
+            {phase1Complete && !confirmed_section && !optimiseResult && (
               <SectionCard
-                result={searchResult}
+                result={phase1_result!.section_result}
                 onOptimise={handleOptimise}
-                onUse={() => handleConfirmSection(searchResult.section)}
+                onConfirmAndContinue={() => handleRunPhase2(phase1_result!.section_result.section)}
                 isOptimising={isOptimising}
+                isPhase2Loading={phase2Loading}
               />
             )}
 
-            {/* Optimised result card */}
-            {optimiseResult && (
+            {phase1Complete && !confirmed_section && optimiseResult && (
               <OptimisedCard
                 result={optimiseResult}
-                onConfirm={() => handleConfirmSection(optimiseResult.selected_section)}
-                onChange={() => { setOptimiseResult(null); setSearchResult(null) }}
+                onConfirm={() => handleRunPhase2(optimiseResult.selected_section)}
+                onChange={() => setOptimiseResult(null)}
+                isPhase2Loading={phase2Loading}
               />
             )}
 
-            {/* Confirmed banner */}
+            {/* Confirmed section banner — shown after Phase 2 runs */}
             {confirmed_section && (
               <div className="flex items-center gap-2 rounded border border-green-500/40 bg-green-500/10 px-4 py-2.5 text-sm text-green-400">
                 <span className="font-bold">✓</span>
@@ -1770,7 +1826,7 @@ export default function Step3() {
                 </span>
                 <button
                   type="button"
-                  onClick={() => { setConfirmedSection(null); setSectionCleared(false) }}
+                  onClick={handleChangeSection}
                   className="ml-auto text-xs text-muted hover:text-accent underline"
                 >
                   Change
@@ -1779,49 +1835,35 @@ export default function Step3() {
             )}
           </div>
 
-          {/* ── Run button ── */}
-          <div className="flex items-center gap-4">
-            <button
-              onClick={handleRunCalculations}
-              disabled={!canRun || loading}
-              className={`btn-primary px-6 py-2.5 text-sm font-semibold ${
-                (!canRun || loading) ? 'opacity-50 cursor-not-allowed' : ''
-              }`}
-            >
-              {loading ? 'Calculating…' : 'Run Calculations'}
-            </button>
-            {!canRun && (
-              <p className="text-xs text-muted">Fill all required fields to enable</p>
-            )}
-          </div>
-
-          {apiError && (
-            <div className="rounded border border-red-500/40 bg-red-500/10 px-4 py-3 text-sm text-red-400">
-              <strong>Error:</strong> {apiError}
-            </div>
-          )}
-
-          {/* ── Results ── */}
-          {calculation_results && (
+          {/* ── Results (shown from Phase 1 onwards) ── */}
+          {(windResult || calculation_results) && (
             <div className="space-y-4 pt-2">
               <p className="text-xs font-semibold uppercase tracking-widest text-muted">Results</p>
-              <WindPanel
-                wind={calculation_results.wind}
-                vbOverridden={vbOverridden}
-                shelterOverridden={shelterOverridden}
-              />
-              <SteelPanel steel={calculation_results.steel} />
-              <FoundationPanel foundation={calculation_results.foundation} />
-              {calculation_results.connection && (
-                <ConnectionPanel conn={calculation_results.connection} />
+
+              {windResult && (
+                <WindPanel
+                  wind={windResult}
+                  vbOverridden={vbOverridden}
+                  shelterOverridden={shelterOverridden}
+                />
               )}
-              {calculation_results.subframe && (
-                <SubframePanel sf={calculation_results.subframe} />
+
+              {calculation_results && (
+                <>
+                  <SteelPanel steel={calculation_results.steel} />
+                  <FoundationPanel foundation={calculation_results.foundation} />
+                  {calculation_results.connection && (
+                    <ConnectionPanel conn={calculation_results.connection} />
+                  )}
+                  {calculation_results.subframe && (
+                    <SubframePanel sf={calculation_results.subframe} />
+                  )}
+                  {calculation_results.lifting && (
+                    <LiftingPanel lift={calculation_results.lifting} />
+                  )}
+                  <OverallBanner results={calculation_results} />
+                </>
               )}
-              {calculation_results.lifting && (
-                <LiftingPanel lift={calculation_results.lifting} />
-              )}
-              <OverallBanner results={calculation_results} />
             </div>
           )}
         </div>

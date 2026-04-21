@@ -104,6 +104,14 @@ def _check_section(
         "designation": sec["designation"],
         "mass_kg_per_m": sec["mass_kg_per_m"],
         "fy_N_per_mm2": fy,
+        # Raw section properties — kept so re-sending this dict as pre_selected_section
+        # in Phase 2 gives _check_section all the inputs it needs (Iy, Iz, Iw, It, Wpl).
+        "Iy_cm4": sec["Iy_cm4"],
+        "Iz_cm4": sec["Iz_cm4"],
+        "Wpl_y_cm3": sec["Wpl_y_cm3"],
+        "Wel_y_cm3": sec.get("Wel_y_cm3"),
+        "Iw_dm6": sec["Iw_dm6"],
+        "It_cm4": sec["It_cm4"],
         "w_kN_per_m": round(w_kN_per_m, 4),
         "M_Ed_kNm": round(M_Ed_kNm, 2),
         "V_Ed_kN": round(V_Ed_kN, 2),

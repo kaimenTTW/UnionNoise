@@ -9,7 +9,19 @@
       "Bash(py --version)",
       "Bash(.venv/Scripts/python.exe -c ':*)",
       "Bash(.venv/Scripts/uvicorn.exe app.main:app --port 8000)",
-      "Bash(netstat -ano)"
+      "Bash(netstat -ano)",
+      "Bash(python -c ' *)",
+      "Bash(uv add *)",
+      "Bash(uv run python -c ' *)",
+      "Bash(npx tsc *)",
+      "Bash(curl -s -X POST http://localhost:8000/api/optimize-section -H \"Content-Type: application/json\" -d \"{\\\\\"section\\\\\":{\\\\\"designation\\\\\":\\\\\"406x140x39\\\\\",\\\\\"mass_kg_per_m\\\\\":39,\\\\\"fy_N_per_mm2\\\\\":275},\\\\\"w_kN_per_m\\\\\":0,\\\\\"L_mm\\\\\":11000,\\\\\"Lcr_mm\\\\\":1500,\\\\\"post_length_m\\\\\":11,\\\\\"M_Ed_kNm\\\\\":10,\\\\\"V_Ed_kN\\\\\":5}\")",
+      "Bash(curl -s -X POST http://localhost:8000/api/select-section -H \"Content-Type: application/json\" -d \"{\\\\\"structure_height\\\\\":6,\\\\\"post_spacing\\\\\":3,\\\\\"subframe_spacing\\\\\":1.5,\\\\\"post_length\\\\\":11,\\\\\"deflection_limit_n\\\\\":65}\")",
+      "Bash(python -c \"import sys,json; d=json.load\\(sys.stdin\\); print\\('w_kN_per_m:', d.get\\('w_kN_per_m'\\), '| designation:', d.get\\('designation'\\), '| fy:', d.get\\('fy_N_per_mm2'\\)\\)\")",
+      "Bash(python -c \"import sys,json; d=json.load\\(sys.stdin\\); print\\('w_kN_per_m:', d.get\\('w_kN_per_m'\\), '| fy_N_per_mm2:', d.get\\('fy_N_per_mm2'\\), '| designation:', d.get\\('designation'\\)\\)\")",
+      "Bash(git add *)",
+      "Bash(git commit -m ' *)",
+      "Bash(git push *)",
+      "Bash(git reset *)"
     ]
   }
 }

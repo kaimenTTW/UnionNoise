@@ -103,6 +103,14 @@ class CalculateRequest(BaseModel):
         description="Optional engineer notes / additional considerations. Stored for PE report."
     )
 
+    # When False (default): steel selection uses library cache only — no web search.
+    # Web search only runs from /api/wind-and-select (Phase 1). Phase 2 always
+    # provides pre_selected_section, so use_retrieval is effectively unused in normal flow.
+    use_retrieval: bool = Field(
+        False,
+        description="Allow web search in steel selection. False by default — Phase 2 always provides pre_selected_section."
+    )
+
 
 # ── Response models ───────────────────────────────────────────────────────────
 
@@ -291,6 +299,7 @@ async def calculate(body: CalculateRequest) -> CalculateResponse:
                 post_length_m=body.post_length,
                 deflection_limit_n=body.deflection_limit_n,
                 remarks=body.remarks,
+                use_retrieval=body.use_retrieval,
             )
     except Exception as exc:
         raise HTTPException(status_code=422, detail=f"Steel calculation failed: {exc}") from exc

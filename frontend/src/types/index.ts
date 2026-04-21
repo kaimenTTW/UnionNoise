@@ -176,6 +176,15 @@ export interface OptimiseResult {
   message: string
 }
 
+// ─── Phase 1 result (returned from POST /api/wind-and-select) ────────────────
+// Combines wind calculation and section search results. Stored in Zustand so
+// the section card survives navigation between Step 3 tabs.
+
+export interface Phase1Result {
+  wind_result: WindCalcResult
+  section_result: SelectionResult
+}
+
 // ─── Calculation results (returned from POST /api/calculate) ─────────────────
 
 export interface WindCalcResult {

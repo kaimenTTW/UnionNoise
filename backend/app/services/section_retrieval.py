@@ -243,6 +243,7 @@ async def select_section(
     post_length_m: float,
     deflection_limit_n: float,
     remarks: str = "",
+    use_retrieval: bool = True,
 ) -> dict:
     """
     Select the lightest passing UB section using live Claude web search with
@@ -255,7 +256,7 @@ async def select_section(
       "all_sections": list[dict]  — all verified candidates for optimisation
     """
     print(
-        f"[section_retrieval] Attempting live retrieval — "
+        f"[section_retrieval] Attempting {'live' if use_retrieval else 'cache-only'} retrieval — "
         f"M_Ed={M_Ed_kNm:.2f} kNm, V_Ed={V_Ed_kN:.2f} kN",
         flush=True,
     )
@@ -276,54 +277,60 @@ async def select_section(
 
     fallback_reason: str | None = None
 
-    try:
-        raw = _search_sections_with_claude(
-            M_Ed_kNm=M_Ed_kNm,
-            V_Ed_kN=V_Ed_kN,
-            wpl_min_cm3=wpl_min_cm3,
-            remarks=remarks,
-        )
-        verified = _verify_against_cache(raw)
+    if not use_retrieval:
+        # Skip web search — go directly to library cache fallback.
+        # Called from /api/calculate Phase 2 where section is already confirmed.
+        fallback_reason = "Web search skipped — using library cache (pre_selected_section flow)"
+        print(f"[section_retrieval] {fallback_reason}", flush=True)
+    else:
+        try:
+            raw = _search_sections_with_claude(
+                M_Ed_kNm=M_Ed_kNm,
+                V_Ed_kN=V_Ed_kN,
+                wpl_min_cm3=wpl_min_cm3,
+                remarks=remarks,
+            )
+            verified = _verify_against_cache(raw)
 
-        # Run checks on all verified sections, collect results
-        results = []
-        for sec in verified:
-            check = _check_section(sec=sec, **check_kwargs)
-            results.append({**check, "section": sec})
+            # Run checks on all verified sections, collect results
+            results = []
+            for sec in verified:
+                check = _check_section(sec=sec, **check_kwargs)
+                results.append({**check, "section": sec})
 
-        # Return lightest passing section + full list for optimisation
-        for r in results:
-            if r["pass"]:
-                print(
-                    f"[section_retrieval] Live: selected {r['designation']}",
-                    flush=True,
-                )
+            # Return lightest passing section + full list for optimisation
+            for r in results:
+                if r["pass"]:
+                    print(
+                        f"[section_retrieval] Live: selected {r['designation']}",
+                        flush=True,
+                    )
+                    return {
+                        **r,
+                        "source": "live",
+                        "all_sections": verified,
+                        "fallback_reason": None,
+                    }
+
+            fallback_reason = "No live candidate passed all checks — falling back to library"
+            print(f"[section_retrieval] {fallback_reason}", flush=True)
+
+            # Even if none passed, return best result with all_sections so frontend
+            # can run optimise (may go up from here)
+            if results:
                 return {
-                    **r,
+                    **results[0],
                     "source": "live",
                     "all_sections": verified,
-                    "fallback_reason": None,
+                    "fallback_reason": fallback_reason,
                 }
 
-        fallback_reason = "No live candidate passed all checks — falling back to library"
-        print(f"[section_retrieval] {fallback_reason}", flush=True)
-
-        # Even if none passed, return best result with all_sections so frontend
-        # can run optimise (may go up from here)
-        if results:
-            return {
-                **results[0],
-                "source": "live",
-                "all_sections": verified,
-                "fallback_reason": fallback_reason,
-            }
-
-    except RuntimeError as exc:
-        fallback_reason = str(exc)
-        print(f"[section_retrieval] RuntimeError: {fallback_reason}", flush=True)
-    except Exception as exc:
-        fallback_reason = f"{type(exc).__name__}: {exc}"
-        print(f"[section_retrieval] Exception: {fallback_reason}", flush=True)
+        except RuntimeError as exc:
+            fallback_reason = str(exc)
+            print(f"[section_retrieval] RuntimeError: {fallback_reason}", flush=True)
+        except Exception as exc:
+            fallback_reason = f"{type(exc).__name__}: {exc}"
+            print(f"[section_retrieval] Exception: {fallback_reason}", flush=True)
 
     # Combined-library fallback (both grades, sorted by mass ascending)
     print("[section_retrieval] Running cache fallback...", flush=True)

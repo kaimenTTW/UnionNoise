@@ -1,5 +1,5 @@
 import { create } from 'zustand'
-import type { BarrierType, CalibrationData, CalculationResults, DesignParameters, OverridableValue, Polyline, ProjectInfo, ProjectMeta, SegmentRow, SiteData, SteelSection } from '../types'
+import type { BarrierType, CalibrationData, CalculationResults, DesignParameters, OverridableValue, Phase1Result, Polyline, ProjectInfo, ProjectMeta, SegmentRow, SiteData, SteelSection } from '../types'
 
 interface ProjectStore {
   project_info: ProjectInfo
@@ -7,6 +7,7 @@ interface ProjectStore {
   meta: ProjectMeta
   design_parameters: DesignParameters
   calculation_results: CalculationResults | null
+  phase1_result: Phase1Result | null
   step3_confirmed: boolean
   confirmed_section: SteelSection | null
 
@@ -25,7 +26,8 @@ interface ProjectStore {
   setMeta: (partial: Partial<ProjectMeta>) => void
   initMeta: (createdBy: string) => void
   setDesignParameters: (partial: Partial<DesignParameters>) => void
-  setCalculationResults: (results: CalculationResults) => void
+  setCalculationResults: (results: CalculationResults | null) => void
+  setPhase1Result: (result: Phase1Result | null) => void
   setConfirmedSection: (section: SteelSection | null) => void
   confirmStep1: () => void
   confirmStep2: () => void
@@ -160,6 +162,7 @@ export const useProjectStore = create<ProjectStore>((set, get) => ({
   meta: defaultMeta,
   design_parameters: defaultDesignParameters,
   calculation_results: null,
+  phase1_result: null,
   step3_confirmed: false,
   confirmed_section: null,
 
@@ -259,6 +262,8 @@ export const useProjectStore = create<ProjectStore>((set, get) => ({
 
   setCalculationResults: (results) => set({ calculation_results: results }),
 
+  setPhase1Result: (result) => set({ phase1_result: result }),
+
   setConfirmedSection: (section) => set({ confirmed_section: section }),
 
   confirmStep1: () =>
@@ -274,7 +279,7 @@ export const useProjectStore = create<ProjectStore>((set, get) => ({
   confirmStep3: () => set({ step3_confirmed: true }),
 
   reset: () =>
-    set({ project_info: defaultProjectInfo, site_data: defaultSiteData, meta: defaultMeta, design_parameters: defaultDesignParameters, calculation_results: null, step3_confirmed: false, confirmed_section: null }),
+    set({ project_info: defaultProjectInfo, site_data: defaultSiteData, meta: defaultMeta, design_parameters: defaultDesignParameters, calculation_results: null, phase1_result: null, step3_confirmed: false, confirmed_section: null }),
 }))
 
 // ─── Derived selectors ────────────────────────────────────────────────────────
