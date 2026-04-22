@@ -718,6 +718,35 @@ function SteelPanel({ steel }: { steel: CalculationResults['steel'] }) {
             </p>
           </div>
         )}
+        {steel.section_class != null && (
+          <div className="col-span-2 flex items-center gap-4 pt-1 border-t border-border/30">
+            <div>
+              <p className="text-muted text-xs">Section class</p>
+              <p className={`font-mono font-semibold ${steel.section_class >= 4 ? 'text-red-400' : steel.section_class === 3 ? 'text-warning' : 'text-green-400'}`}>
+                Class {steel.section_class}
+                {steel.class3_wel_used && <span className="ml-1 text-xs font-normal text-warning">(Wel used)</span>}
+              </p>
+            </div>
+            {steel.epsilon != null && (
+              <div>
+                <p className="text-muted text-xs">ε</p>
+                <p className="font-mono">{steel.epsilon.toFixed(3)}</p>
+              </div>
+            )}
+            {steel.cf_tf_ratio != null && (
+              <div>
+                <p className="text-muted text-xs">cf/tf</p>
+                <p className="font-mono">{steel.cf_tf_ratio.toFixed(2)}</p>
+              </div>
+            )}
+            {steel.cw_tw_ratio != null && (
+              <div>
+                <p className="text-muted text-xs">cw/tw</p>
+                <p className="font-mono">{steel.cw_tw_ratio.toFixed(2)}</p>
+              </div>
+            )}
+          </div>
+        )}
       </div>
       <DerivationPanel rows={buildSteelRows(steel)} />
     </div>
@@ -798,13 +827,15 @@ function FoundationPanel({ foundation }: { foundation: CalculationResults['found
 
 function ConnectionPanel({ conn }: { conn: ConnectionCalcResult }) {
   const checks = [
-    { label: 'Bolt tension',       demand: conn.bolt_tension?.Ft_per_bolt_kN != null ? `${conn.bolt_tension.Ft_per_bolt_kN.toFixed(2)} kN` : '—', capacity: conn.bolt_tension?.FT_Rd_kN != null ? `${conn.bolt_tension.FT_Rd_kN.toFixed(2)} kN` : '—', ur: conn.bolt_tension?.UR, pass: conn.bolt_tension?.pass ?? false },
-    { label: 'Bolt shear',         demand: conn.bolt_shear?.Fv_per_bolt_kN != null ? `${conn.bolt_shear.Fv_per_bolt_kN.toFixed(2)} kN` : '—', capacity: conn.bolt_shear?.Fv_Rd_kN != null ? `${conn.bolt_shear.Fv_Rd_kN.toFixed(2)} kN` : '—', ur: conn.bolt_shear?.UR, pass: conn.bolt_shear?.pass ?? false },
-    { label: 'Bolt combined',      demand: '—', capacity: '—', ur: conn.bolt_combined?.UR, pass: conn.bolt_combined?.pass ?? false },
-    { label: 'Bolt embedment',     demand: conn.bolt_embedment?.L_required_mm != null ? `${conn.bolt_embedment.L_required_mm.toFixed(0)} mm` : '—', capacity: conn.bolt_embedment?.L_provided_mm != null ? `${conn.bolt_embedment.L_provided_mm} mm` : '—', ur: conn.bolt_embedment?.UR, pass: conn.bolt_embedment?.pass ?? false },
-    { label: 'Weld',               demand: conn.weld?.FR_N_per_mm != null ? `${conn.weld.FR_N_per_mm.toFixed(3)} N/mm` : '—', capacity: conn.weld?.Fw_Rd_N_per_mm != null ? `${conn.weld.Fw_Rd_N_per_mm.toFixed(3)} N/mm` : '—', ur: conn.weld?.UR, pass: conn.weld?.pass ?? false },
-    { label: 'Base plate',         demand: '—', capacity: conn.base_plate?.compression_resistance_kN != null ? `${conn.base_plate.compression_resistance_kN.toFixed(1)} kN` : '—', ur: conn.base_plate?.UR, pass: conn.base_plate?.pass ?? false },
-    { label: 'G clamp',            demand: conn.g_clamp?.F_per_clamp_kN != null ? `${conn.g_clamp.F_per_clamp_kN.toFixed(2)} kN` : '—', capacity: conn.g_clamp?.failure_load_kN != null ? `${conn.g_clamp.failure_load_kN.toFixed(2)} kN` : '—', ur: conn.g_clamp?.UR, pass: conn.g_clamp?.pass ?? false },
+    { label: 'Bolt tension',         demand: conn.bolt_tension?.Ft_per_bolt_kN != null ? `${conn.bolt_tension.Ft_per_bolt_kN.toFixed(2)} kN` : '—', capacity: conn.bolt_tension?.FT_Rd_kN != null ? `${conn.bolt_tension.FT_Rd_kN.toFixed(2)} kN` : '—', ur: conn.bolt_tension?.UR, pass: conn.bolt_tension?.pass ?? false },
+    { label: 'Bolt shear',           demand: conn.bolt_shear?.Fv_per_bolt_kN != null ? `${conn.bolt_shear.Fv_per_bolt_kN.toFixed(2)} kN` : '—', capacity: conn.bolt_shear?.Fv_Rd_kN != null ? `${conn.bolt_shear.Fv_Rd_kN.toFixed(2)} kN` : '—', ur: conn.bolt_shear?.UR, pass: conn.bolt_shear?.pass ?? false },
+    ...(conn.bolt_bearing != null ? [{ label: 'Bolt bearing', demand: '—', capacity: conn.bolt_bearing.Fb_Rd_kN != null ? `${conn.bolt_bearing.Fb_Rd_kN.toFixed(2)} kN` : '—', ur: conn.bolt_bearing.UR, pass: conn.bolt_bearing.pass ?? false }] : []),
+    { label: 'Bolt combined',        demand: '—', capacity: '—', ur: conn.bolt_combined?.UR, pass: conn.bolt_combined?.pass ?? false },
+    { label: 'Bolt embedment',       demand: conn.bolt_embedment?.L_required_mm != null ? `${conn.bolt_embedment.L_required_mm.toFixed(0)} mm` : '—', capacity: conn.bolt_embedment?.L_provided_mm != null ? `${conn.bolt_embedment.L_provided_mm} mm` : '—', ur: conn.bolt_embedment?.UR, pass: conn.bolt_embedment?.pass ?? false },
+    { label: 'Weld',                 demand: conn.weld?.FR_N_per_mm != null ? `${conn.weld.FR_N_per_mm.toFixed(3)} N/mm` : '—', capacity: conn.weld?.Fw_Rd_N_per_mm != null ? `${conn.weld.Fw_Rd_N_per_mm.toFixed(3)} N/mm` : '—', ur: conn.weld?.UR, pass: conn.weld?.pass ?? false },
+    { label: 'Base plate — bearing', demand: '—', capacity: conn.base_plate?.base_plate_bearing?.compression_resistance_kN != null ? `${conn.base_plate.base_plate_bearing.compression_resistance_kN.toFixed(1)} kN` : '—', ur: conn.base_plate?.base_plate_bearing?.UR, pass: conn.base_plate?.base_plate_bearing?.pass ?? false },
+    ...(conn.base_plate?.base_plate_bending != null ? [{ label: 'Base plate — bending', demand: conn.base_plate.base_plate_bending.M_demand_kNm != null ? `${conn.base_plate.base_plate_bending.M_demand_kNm.toFixed(3)} kNm` : '—', capacity: conn.base_plate.base_plate_bending.M_cap_kNm != null ? `${conn.base_plate.base_plate_bending.M_cap_kNm.toFixed(3)} kNm` : '—', ur: conn.base_plate.base_plate_bending.UR, pass: conn.base_plate.base_plate_bending.pass ?? false }] : []),
+    { label: 'G clamp',              demand: conn.g_clamp?.F_per_clamp_kN != null ? `${conn.g_clamp.F_per_clamp_kN.toFixed(2)} kN` : '—', capacity: conn.g_clamp?.failure_load_kN != null ? `${conn.g_clamp.failure_load_kN.toFixed(2)} kN` : '—', ur: conn.g_clamp?.UR, pass: conn.g_clamp?.pass ?? false },
   ]
   return (
     <div className="panel space-y-3">
@@ -968,18 +999,21 @@ function SectionCard({
   onConfirmAndContinue,
   isOptimising,
   isPhase2Loading,
+  canRun,
 }: {
   result: SelectionResult
   onOptimise: () => void
   onConfirmAndContinue: () => void
   isOptimising: boolean
   isPhase2Loading: boolean
+  canRun: boolean
 }) {
   const { section, checks, source, fallback_reason } = result
   const allPass = checks.pass
   const gradeLabel = section.fy_N_per_mm2 >= 355 ? 'S355' : 'S275'
   const sourceLabel =
     source === 'live' ? 'Continental Steel (live)' : source === 'cache' ? 'Library (cached)' : 'Pre-selected'
+  const confirmDisabled = !canRun || isPhase2Loading
 
   return (
     <div className="rounded border border-border bg-surface/40 p-4 space-y-3">
@@ -1019,6 +1053,9 @@ function SectionCard({
       ) : (
         <p className="text-xs text-warning">Some checks fail — optimisation recommended</p>
       )}
+      {!canRun && (
+        <p className="text-xs text-red-400/80">Fill all foundation fields above to enable confirmation.</p>
+      )}
       <div className="flex gap-2 pt-1">
         <button
           type="button"
@@ -1031,8 +1068,9 @@ function SectionCard({
         <button
           type="button"
           onClick={onConfirmAndContinue}
-          disabled={isPhase2Loading}
-          className={`px-4 py-1.5 text-xs font-medium border border-border rounded hover:border-accent transition-colors ${isPhase2Loading ? 'opacity-50 cursor-not-allowed' : ''}`}
+          disabled={confirmDisabled}
+          title={!canRun ? 'Fill all foundation fields to enable' : undefined}
+          className={`px-4 py-1.5 text-xs font-medium border border-border rounded transition-colors ${confirmDisabled ? 'opacity-40 cursor-not-allowed text-muted' : 'hover:border-accent'}`}
         >
           {isPhase2Loading ? 'Calculating…' : 'Confirm & Continue →'}
         </button>
@@ -1804,6 +1842,7 @@ export default function Step3() {
                 onConfirmAndContinue={() => handleRunPhase2(phase1_result!.section_result.section)}
                 isOptimising={isOptimising}
                 isPhase2Loading={phase2Loading}
+                canRun={canRun}
               />
             )}
 

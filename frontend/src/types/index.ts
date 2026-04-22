@@ -229,6 +229,14 @@ export interface SteelCalcResult {
   Lcr_mm?: number
   post_length_m?: number
   deflection_limit_n?: number
+  section_class?: number
+  epsilon?: number
+  cf_tf_ratio?: number
+  cw_tw_ratio?: number
+  flange_class?: number
+  web_class?: number
+  class3_wel_used?: boolean
+  class4_error?: string | null
   selection_source?: string | null
   fallback_reason?: string | null
   pass: boolean
@@ -300,6 +308,18 @@ export interface ConnectionCalcResult {
     UR?: number
     pass?: boolean
   }
+  bolt_bearing?: {
+    d0_mm?: number
+    e1_mm?: number
+    e2_mm?: number
+    alpha_d?: number
+    alpha_fub?: number
+    alpha?: number
+    k1?: number
+    Fb_Rd_kN?: number
+    UR?: number
+    pass?: boolean
+  }
   bolt_combined?: { UR?: number; pass?: boolean }
   bolt_embedment?: {
     fbd_N_per_mm2?: number
@@ -316,7 +336,19 @@ export interface ConnectionCalcResult {
     pass?: boolean
   }
   base_plate?: {
-    compression_resistance_kN?: number
+    base_plate_bearing?: {
+      compression_resistance_kN?: number
+      UR?: number
+      pass?: boolean
+    }
+    base_plate_bending?: {
+      e_bolt_mm?: number
+      Z_plate_mm3?: number
+      M_cap_kNm?: number
+      M_demand_kNm?: number
+      UR?: number
+      pass?: boolean
+    }
     UR?: number
     pass?: boolean
   }

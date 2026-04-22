@@ -22,7 +22,12 @@
         "n_tension": 2,
         "n_shear": 4,
         "embedment_mm": 400,
-        "_Ds_note": "Ds derived as plate_height/2 = 350/2 = 175mm. Unvalidated — pending PE drawing review."
+        "e1_mm": 50,
+        "e2_mm": 50,
+        "p1_mm": 48,
+        "p2_mm": 48,
+        "_Ds_note": "Ds derived as plate_height/2 = 350/2 = 175mm. Unvalidated — pending PE drawing review.",
+        "_bearing_note": "e1=e2=50mm standard edge distance. p1=p2=2.4*d=48mm minimum spacing fallback."
       },
       "source": "Image 3 — Section 1b Base Plate drawing"
     },
@@ -44,7 +49,12 @@
         "n_tension": 2,
         "n_shear": 6,
         "embedment_mm": 400,
-        "_Ds_note": "Ds derived as plate_height/2 = 530/2 = 265mm. Unvalidated — pending PE drawing review."
+        "e1_mm": 50,
+        "e2_mm": 50,
+        "p1_mm": 48,
+        "p2_mm": 48,
+        "_Ds_note": "Ds derived as plate_height/2 = 530/2 = 265mm. Unvalidated — pending PE drawing review.",
+        "_bearing_note": "e1=e2=50mm standard edge distance. p1=p2=2.4*d=48mm minimum spacing fallback."
       },
       "source": "Image 1 — Section B drawing"
     },
@@ -69,7 +79,12 @@
         "n_shear": 6,
         "embedment_mm": 650,
         "Ds_mm": 450,
-        "_Ds_note": "Ds=450mm explicitly stated in PE calculation report page 10. Not derived from plate geometry."
+        "e1_mm": 50,
+        "e2_mm": 50,
+        "p1_mm": 125,
+        "p2_mm": 125,
+        "_Ds_note": "Ds=450mm explicitly stated in PE calculation report page 10. Not derived from plate geometry.",
+        "_bearing_note": "e1=e2=50mm standard edge distance. p1=p2=125mm from bolt template 50|125|125|50 layout (D-P105-TNCB-3002)."
       },
       "bolt_rows": 2,
       "bolt_cols": 3,

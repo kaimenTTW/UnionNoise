@@ -168,6 +168,16 @@ function SteelCard({ results }: { results: CalculationResults }) {
       <UrRow label="Moment UR" value={steel.UR_moment} pass={momentPass} />
       <UrRow label="Deflection UR" value={steel.UR_deflection} pass={deflPass} />
       <UrRow label="Shear UR" value={steel.UR_shear} pass={shearPass} />
+      {steel.section_class != null && (
+        <div className="flex items-center justify-between py-1 border-b border-border/30 last:border-0">
+          <span className="text-xs text-muted">Section class</span>
+          <span className={`font-mono text-xs font-semibold ${steel.section_class >= 4 ? 'text-red-400' : steel.section_class === 3 ? 'text-amber-400' : 'text-green-400'}`}>
+            Class {steel.section_class}
+            {steel.class3_wel_used && <span className="ml-1 font-normal text-amber-400"> (Wel)</span>}
+            {steel.epsilon != null && <span className="ml-2 text-muted font-normal text-[10px]">ε={steel.epsilon.toFixed(3)}</span>}
+          </span>
+        </div>
+      )}
       <NoteEditor moduleId="steel" />
     </CardShell>
   )
@@ -238,6 +248,9 @@ function ConnectionCard({ conn }: { conn: ConnectionCalcResult }) {
       {conn.bolt_shear?.UR != null && (
         <UrRow label="Bolt shear" value={conn.bolt_shear.UR} pass={conn.bolt_shear.pass ?? false} />
       )}
+      {conn.bolt_bearing?.UR != null && (
+        <UrRow label="Bolt bearing" value={conn.bolt_bearing.UR} pass={conn.bolt_bearing.pass ?? false} />
+      )}
       {conn.bolt_combined?.UR != null && (
         <UrRow label="Bolt combined" value={conn.bolt_combined.UR} pass={conn.bolt_combined.pass ?? false} />
       )}
@@ -247,8 +260,11 @@ function ConnectionCard({ conn }: { conn: ConnectionCalcResult }) {
       {conn.weld?.UR != null && (
         <UrRow label="Weld" value={conn.weld.UR} pass={conn.weld.pass ?? false} />
       )}
-      {conn.base_plate?.UR != null && (
-        <UrRow label="Base plate" value={conn.base_plate.UR} pass={conn.base_plate.pass ?? false} />
+      {conn.base_plate?.base_plate_bearing?.UR != null && (
+        <UrRow label="Base plate — bearing" value={conn.base_plate.base_plate_bearing.UR} pass={conn.base_plate.base_plate_bearing.pass ?? false} />
+      )}
+      {conn.base_plate?.base_plate_bending?.UR != null && (
+        <UrRow label="Base plate — bending" value={conn.base_plate.base_plate_bending.UR} pass={conn.base_plate.base_plate_bending.pass ?? false} />
       )}
       {conn.g_clamp?.UR != null && (
         <UrRow label="G clamp" value={conn.g_clamp.UR} pass={conn.g_clamp.pass ?? false} />

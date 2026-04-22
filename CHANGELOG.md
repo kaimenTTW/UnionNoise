@@ -1,5 +1,27 @@
 # CHANGELOG
 
+## [0.17.1] — 2026-04-22
+### Added
+- `Step3.tsx` / `Step4.tsx`: Section class displayed in SteelPanel and SteelCard — Class 1/2 green, Class 3 amber with "(Wel)" note, Class 4 red. ε, cf/tf, cw/tw shown inline.
+- `Step3.tsx` / `Step4.tsx`: Bolt bearing row added to ConnectionPanel checks table and ConnectionCard UR rows.
+- `Step3.tsx` / `Step4.tsx`: Base plate split into two rows — "Base plate — bearing" and "Base plate — bending" — with demand/capacity for each. Previously a single aggregated "Base plate" row.
+- `types/index.ts`: `SteelCalcResult` extended with `section_class`, `epsilon`, `cf_tf_ratio`, `cw_tw_ratio`, `flange_class`, `web_class`, `class3_wel_used`, `class4_error`. `ConnectionCalcResult` extended with `bolt_bearing` sub-dict.
+
+---
+
+## [0.17.0] — 2026-04-22
+### Added
+- `steel.py`: Section classification per EC3 Table 5.2 — ε, flange class (cf/tf), web class (cw/tw), governing section_class. Class 3 substitutes Wel_y for Wpl_y in Mpl/Mb_Rd; Class 4 skips moment check and returns pass=False with `class4_error`. New keys in output: `section_class`, `epsilon`, `cf_tf_ratio`, `cw_tw_ratio`, `flange_class`, `web_class`, `class3_wel_used`, `class4_error`.
+- `connection.py`: Bolt bearing check (EC3-1-8 Table 3.4) — new `bolt_bearing` sub-dict with d0, e1, e2, alpha_d, alpha_fub, alpha, k1, Fb_Rd_kN, UR, pass. Inserted after bolt shear; included in `all_checks_pass`.
+- `connection.py`: Base plate bending check — new `base_plate_bending` sub-dict within `base_plate` key (alongside existing `base_plate_bearing`). Formula: Z=width×t²/4, M_cap=fy×Z/1e6, M_demand=Ft×e_bolt/1000, e_bolt=50mm. Both sub-checks included in `all_checks_pass`. Top-level `base_plate.UR` and `base_plate.pass` now reflect governing of the two sub-checks.
+- `connection_library.json`: `e1_mm`, `e2_mm`, `p1_mm`, `p2_mm` added to all three bolt configs. T1_M24_6bolt uses p1=p2=125mm from drawing layout; unvalidated configs use 2.4×d fallback.
+### Notes
+- All P105 T2 previously validated outputs (Ft=96.53 kN, FT_Rd=260.58 kN, UR_tension=0.370, UR_embedment=0.731, G clamp n=5, T2 section UB406×140×39, UR_moment=0.977) remain identical.
+- P105 T2 section_class=1 confirmed (cf/tf=6.69, cw/tw=56.3 — both Class 1 at ε=0.924).
+- `base_plate` key structure changed: now contains `base_plate_bearing` and `base_plate_bending` sub-dicts. `base_plate.UR` and `base_plate.pass` retained for backward compatibility.
+
+---
+
 ## [0.16.1] — 2026-04-22
 ### Fixed
 - `projectStore.ts`: wrapped store with `zustand/persist` (key `union-noise-project`, localStorage) — calculation results and all state now survive browser tab switches and page refreshes.

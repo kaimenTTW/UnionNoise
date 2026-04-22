@@ -124,6 +124,26 @@ def compute_connection(
     Fv_Rd_kN = alpha_v * fub * As_mm2 / gamma_M2 / 1000   # threaded area — conservative
     UR_bolt_shear = Fv_per_bolt_kN / Fv_Rd_kN
 
+    # ── Check 2b: Bolt bearing (EC3-1-8 Table 3.4) ───────────────────────────
+    d0 = diameter_mm + 2.0  # hole diameter [mm]
+    fu = 410.0              # N/mm² — plate steel S275/S355 ultimate
+
+    e1 = bolt.get("e1_mm", 50.0)
+    e2 = bolt.get("e2_mm", 50.0)
+    p2 = bolt.get("p2_mm", 2.4 * diameter_mm)
+
+    alpha_d = e1 / (3.0 * d0)
+    alpha_fub = fub / fu
+    alpha_bearing = min(alpha_d, alpha_fub, 1.0)
+
+    k1 = min(2.8 * e2 / d0 - 1.7, 2.5)
+
+    t_plate = plate["thickness_mm"]
+    Fb_Rd_kN = k1 * alpha_bearing * fub * diameter_mm * t_plate / gamma_M2 / 1000
+
+    governing_bolt_force_kN = max(Fv_per_bolt_kN, Ft_per_bolt_kN)
+    UR_bolt_bearing = governing_bolt_force_kN / Fb_Rd_kN
+
     # ── Check 3: Combined bolt (EC3 Table 3.4) ────────────────────────────────
     UR_bolt_combined = (Fv_per_bolt_kN / Fv_Rd_kN) + (Ft_per_bolt_kN / FT_Rd_kN) / 1.4
 
@@ -165,7 +185,7 @@ def compute_connection(
     FR_N_per_mm = math.sqrt(fs_N_per_mm ** 2 + fm_N_per_mm ** 2)
 
     # Weld resistance per unit length (EC3 Cl 4.5.3.3) [N/mm]
-    fu = 410.0      # N/mm2 — E45 electrode (matching S275 steel)
+    # fu already defined above (410 N/mm2 — E45 electrode matching S275 steel)
     beta_w = 0.85   # correlation factor for S275 (EC3 Table 4.1)
     Fw_Rd_N_per_mm = fu * throat_mm / (beta_w * gamma_M2 * math.sqrt(2))
     UR_weld = FR_N_per_mm / Fw_Rd_N_per_mm
@@ -176,7 +196,6 @@ def compute_connection(
     fcd = fck_N_per_mm2 / CONCRETE["gamma_c"]  # design concrete compressive strength
     fy_plate = 265.0     # N/mm2 — conservative for S275 plate (tf > 16mm)
     gamma_M0 = STEEL["gamma_M0"]  # 1.0
-    t_plate = plate["thickness_mm"]
 
     c = t_plate * math.sqrt(fy_plate / (3 * fcd * gamma_M0))
     beff = 2 * c + tf
@@ -185,7 +204,15 @@ def compute_connection(
     compression_resistance_kN = fcd * A_eff_mm2 / 1000
 
     axial_kN = 5.0   # kN — conservative placeholder; axial load negligible for noise barriers
-    UR_base_plate = axial_kN / compression_resistance_kN
+    UR_base_plate_bearing = axial_kN / compression_resistance_kN
+
+    # ── Check 6b: Base plate bending ─────────────────────────────────────────
+    e_bolt_mm = 50.0
+    plate_width_mm = plate["width_mm"]
+    Z_plate_mm3 = plate_width_mm * t_plate ** 2 / 4
+    M_cap_kNm = fy_plate * Z_plate_mm3 / 1e6
+    M_demand_kNm_plate = Ft_per_bolt_kN * e_bolt_mm / 1000
+    UR_base_plate_bending = M_demand_kNm_plate / M_cap_kNm
 
     # ── Check 7: G clamp (STS test-based proprietary check) ──────────────────
     # Uses external pressure (qp x cp_net, pre-shelter) — not design_pressure.
@@ -205,10 +232,12 @@ def compute_connection(
     all_checks_pass = (
         UR_bolt_tension < 1.0
         and UR_bolt_shear < 1.0
+        and UR_bolt_bearing < 1.0
         and UR_bolt_combined < 1.0
         and UR_embedment < 1.0
         and UR_weld < 1.0
-        and UR_base_plate < 1.0
+        and UR_base_plate_bearing < 1.0
+        and UR_base_plate_bending < 1.0
         and UR_gclamp < 1.0
     )
 
@@ -235,6 +264,18 @@ def compute_connection(
             "UR": round(UR_bolt_shear, 3),
             "pass": UR_bolt_shear < 1.0,
         },
+        "bolt_bearing": {
+            "d0_mm": d0,
+            "e1_mm": e1,
+            "e2_mm": e2,
+            "alpha_d": round(alpha_d, 4),
+            "alpha_fub": round(alpha_fub, 4),
+            "alpha": round(alpha_bearing, 4),
+            "k1": round(k1, 4),
+            "Fb_Rd_kN": round(Fb_Rd_kN, 2),
+            "UR": round(UR_bolt_bearing, 3),
+            "pass": UR_bolt_bearing < 1.0,
+        },
         "bolt_combined": {
             "UR": round(UR_bolt_combined, 3),
             "pass": UR_bolt_combined < 1.0,
@@ -259,13 +300,26 @@ def compute_connection(
             "pass": UR_weld < 1.0,
         },
         "base_plate": {
-            "c_mm": round(c, 2),
-            "beff_mm": round(beff, 2),
-            "leff_mm": round(leff, 2),
-            "A_eff_mm2": round(A_eff_mm2, 1),
-            "compression_resistance_kN": round(compression_resistance_kN, 2),
-            "UR": round(UR_base_plate, 4),
-            "pass": UR_base_plate < 1.0,
+            "base_plate_bearing": {
+                "c_mm": round(c, 2),
+                "beff_mm": round(beff, 2),
+                "leff_mm": round(leff, 2),
+                "A_eff_mm2": round(A_eff_mm2, 1),
+                "compression_resistance_kN": round(compression_resistance_kN, 2),
+                "UR": round(UR_base_plate_bearing, 4),
+                "pass": UR_base_plate_bearing < 1.0,
+            },
+            "base_plate_bending": {
+                "e_bolt_mm": round(e_bolt_mm, 1),
+                "Z_plate_mm3": round(Z_plate_mm3, 1),
+                "M_cap_kNm": round(M_cap_kNm, 3),
+                "M_demand_kNm": round(M_demand_kNm_plate, 3),
+                "UR": round(UR_base_plate_bending, 3),
+                "pass": UR_base_plate_bending < 1.0,
+            },
+            # Top-level UR/pass: governing of the two sub-checks (for backward compat)
+            "UR": round(max(UR_base_plate_bearing, UR_base_plate_bending), 4),
+            "pass": UR_base_plate_bearing < 1.0 and UR_base_plate_bending < 1.0,
         },
         "g_clamp": {
             "n_clamps_required": n_clamps_required,

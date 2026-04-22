@@ -60,6 +60,88 @@ def _check_section(
 
     fy = sec["fy_N_per_mm2"]
 
+    h_mm = sec["h_mm"]
+    b_mm = sec["b_mm"]
+    tf_mm = sec["tf_mm"]
+    tw_mm = sec["tw_mm"]
+    r_mm = sec["r_mm"]
+
+    # ── Section classification — EC3 Table 5.2 ───────────────────────────────
+    epsilon = math.sqrt(235.0 / fy)
+    cf = (b_mm - tw_mm - 2 * r_mm) / 2
+    cw = h_mm - 2 * tf_mm - 2 * r_mm
+    cf_tf = cf / tf_mm
+    cw_tw = cw / tw_mm
+
+    if cf_tf <= 9 * epsilon:
+        flange_class = 1
+    elif cf_tf <= 10 * epsilon:
+        flange_class = 2
+    elif cf_tf <= 14 * epsilon:
+        flange_class = 3
+    else:
+        flange_class = 4
+
+    if cw_tw <= 72 * epsilon:
+        web_class = 1
+    elif cw_tw <= 83 * epsilon:
+        web_class = 2
+    elif cw_tw <= 124 * epsilon:
+        web_class = 3
+    else:
+        web_class = 4
+
+    section_class = max(flange_class, web_class)
+
+    # Class 4: skip moment check — effective properties required
+    if section_class == 4:
+        class4_msg = "Class 4 section — effective properties required, refer to PE."
+        A_mm2 = sec["mass_kg_per_m"] / 0.785 * 100
+        Av_mm2 = A_mm2 - 2 * b_mm * tf_mm + (tw_mm + 2 * r_mm) * tf_mm
+        Vc_kN = Av_mm2 * (fy / math.sqrt(3)) / STEEL["gamma_M0"] / 1000
+        UR_shear = V_Ed_kN / Vc_kN
+        return {
+            "designation": sec["designation"],
+            "mass_kg_per_m": sec["mass_kg_per_m"],
+            "fy_N_per_mm2": fy,
+            "Iy_cm4": sec["Iy_cm4"],
+            "Iz_cm4": sec["Iz_cm4"],
+            "Wpl_y_cm3": sec["Wpl_y_cm3"],
+            "Wel_y_cm3": sec.get("Wel_y_cm3"),
+            "Iw_dm6": sec["Iw_dm6"],
+            "It_cm4": sec["It_cm4"],
+            "w_kN_per_m": round(w_kN_per_m, 4),
+            "M_Ed_kNm": round(M_Ed_kNm, 2),
+            "V_Ed_kN": round(V_Ed_kN, 2),
+            "section_class": section_class,
+            "epsilon": round(epsilon, 4),
+            "cf_tf_ratio": round(cf_tf, 3),
+            "cw_tw_ratio": round(cw_tw, 3),
+            "flange_class": flange_class,
+            "web_class": web_class,
+            "class3_wel_used": False,
+            "class4_error": class4_msg,
+            "Av_mm2": round(Av_mm2, 2),
+            "Vc_kN": round(Vc_kN, 2),
+            "UR_shear": round(UR_shear, 4),
+            "h_mm": h_mm,
+            "b_mm": b_mm,
+            "tf_mm": tf_mm,
+            "tw_mm": tw_mm,
+            "r_mm": r_mm,
+            "Lcr_mm": Lcr_mm,
+            "post_length_m": post_length_m,
+            "deflection_limit_n": deflection_limit_n,
+            "pass": False,
+        }
+
+    # Class 1/2: plastic modulus; Class 3: elastic modulus
+    class3_wel_used = section_class == 3
+    if class3_wel_used:
+        W_y_mm3 = (sec.get("Wel_y_cm3") or sec["Wpl_y_cm3"]) * 1e3
+    else:
+        W_y_mm3 = sec["Wpl_y_cm3"] * 1e3
+
     Wpl_y_mm3 = sec["Wpl_y_cm3"] * 1e3
     Iz_mm4 = sec["Iz_cm4"] * 1e4
     Iy_mm4 = sec["Iy_cm4"] * 1e4
@@ -67,7 +149,8 @@ def _check_section(
     # Iw: empirically validated multiplier — see code-reference.md Section 4.4
     Iw_mm6 = sec["Iw_dm6"] * 1e6
 
-    Mpl_kNm = Wpl_y_mm3 * fy / gamma_M1 / 1e6
+    # Mpl uses W_y (Wpl for Class 1/2, Wel for Class 3)
+    Mpl_kNm = W_y_mm3 * fy / gamma_M1 / 1e6
 
     pi2EIz_over_Lcr2 = math.pi ** 2 * E * Iz_mm4 / Lcr_mm ** 2
     warping_term = Iw_mm6 / Iz_mm4
@@ -80,7 +163,7 @@ def _check_section(
     discriminant = max(0.0, phi_LT ** 2 - beta * lambda_bar_LT ** 2)
     chi_LT = min(1.0, 1 / (phi_LT + math.sqrt(discriminant)))
 
-    Mb_Rd_kNm = chi_LT * Wpl_y_mm3 * fy / gamma_M1 / 1e6
+    Mb_Rd_kNm = chi_LT * W_y_mm3 * fy / gamma_M1 / 1e6
     UR_moment = M_Ed_kNm / Mb_Rd_kNm
 
     w_N_per_mm = w_kN_per_m
@@ -89,11 +172,6 @@ def _check_section(
     UR_deflection = delta_mm / delta_allow_mm
 
     A_mm2 = sec["mass_kg_per_m"] / 0.785 * 100
-    h_mm = sec["h_mm"]
-    b_mm = sec["b_mm"]
-    tf_mm = sec["tf_mm"]
-    tw_mm = sec["tw_mm"]
-    r_mm = sec["r_mm"]
     Av_mm2 = A_mm2 - 2 * b_mm * tf_mm + (tw_mm + 2 * r_mm) * tf_mm
     Vc_kN = Av_mm2 * (fy / math.sqrt(3)) / STEEL["gamma_M0"] / 1000
     UR_shear = V_Ed_kN / Vc_kN
@@ -115,6 +193,14 @@ def _check_section(
         "w_kN_per_m": round(w_kN_per_m, 4),
         "M_Ed_kNm": round(M_Ed_kNm, 2),
         "V_Ed_kN": round(V_Ed_kN, 2),
+        "section_class": section_class,
+        "epsilon": round(epsilon, 4),
+        "cf_tf_ratio": round(cf_tf, 3),
+        "cw_tw_ratio": round(cw_tw, 3),
+        "flange_class": flange_class,
+        "web_class": web_class,
+        "class3_wel_used": class3_wel_used,
+        "class4_error": None,
         "Mpl_kNm": round(Mpl_kNm, 2),
         "Mcr_kNm": round(Mcr_kNm, 2),
         "lambda_bar_LT": round(lambda_bar_LT, 4),
