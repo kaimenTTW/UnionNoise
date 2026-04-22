@@ -63,7 +63,7 @@ export default function Sidebar() {
       {/* Step list */}
       <nav className="flex-1 py-4">
         {STEPS.map((s) => {
-          const locked = s.number > unlockedUpTo
+          const locked = s.number > unlockedUpTo || s.number === 5
           const isActive = s.number === currentStep
           const status = stepStatus(
             s.number,

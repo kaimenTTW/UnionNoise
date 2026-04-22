@@ -10,6 +10,7 @@ interface ProjectStore {
   phase1_result: Phase1Result | null
   step3_confirmed: boolean
   confirmed_section: SteelSection | null
+  step4_notes: Record<string, string>
 
   setProjectInfo: (partial: Partial<ProjectInfo>) => void
   setSiteData: (partial: Partial<SiteData>) => void
@@ -29,6 +30,7 @@ interface ProjectStore {
   setCalculationResults: (results: CalculationResults | null) => void
   setPhase1Result: (result: Phase1Result | null) => void
   setConfirmedSection: (section: SteelSection | null) => void
+  setStep4Note: (moduleId: string, note: string) => void
   confirmStep1: () => void
   confirmStep2: () => void
   confirmStep3: () => void
@@ -165,6 +167,7 @@ export const useProjectStore = create<ProjectStore>((set, get) => ({
   phase1_result: null,
   step3_confirmed: false,
   confirmed_section: null,
+  step4_notes: {},
 
   setProjectInfo: (partial) =>
     set((s) => ({ project_info: { ...s.project_info, ...partial } })),
@@ -266,6 +269,9 @@ export const useProjectStore = create<ProjectStore>((set, get) => ({
 
   setConfirmedSection: (section) => set({ confirmed_section: section }),
 
+  setStep4Note: (moduleId, note) =>
+    set((s) => ({ step4_notes: { ...s.step4_notes, [moduleId]: note } })),
+
   confirmStep1: () =>
     set((s) => ({
       project_info: { ...s.project_info, step1_confirmed: true },
@@ -279,7 +285,7 @@ export const useProjectStore = create<ProjectStore>((set, get) => ({
   confirmStep3: () => set({ step3_confirmed: true }),
 
   reset: () =>
-    set({ project_info: defaultProjectInfo, site_data: defaultSiteData, meta: defaultMeta, design_parameters: defaultDesignParameters, calculation_results: null, phase1_result: null, step3_confirmed: false, confirmed_section: null }),
+    set({ project_info: defaultProjectInfo, site_data: defaultSiteData, meta: defaultMeta, design_parameters: defaultDesignParameters, calculation_results: null, phase1_result: null, step3_confirmed: false, confirmed_section: null, step4_notes: {} }),
 }))
 
 // ─── Derived selectors ────────────────────────────────────────────────────────

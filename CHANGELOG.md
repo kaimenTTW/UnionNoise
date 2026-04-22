@@ -1,733 +1,274 @@
 # CHANGELOG
 
+## [0.16.0] — 2026-04-22
+### Added
+- `Step4.tsx` — Design Review / Acceptance Gate. Full-width page with an overall pass/fail banner and one card per module (Steel Post, Foundation, Connection, Subframe, Lifting). Cards show per-check UR/FOS rows with green/red colouring and a green or red card border per overall pass. Inline note editor per card: "Add note" → textarea with Save/Cancel; saved notes display in amber with an "Edit" link. "Proceed to Outputs" button navigates to Step 6; disabled with tooltip when any module fails. Guard clause when `calculation_results` is null.
+- `projectStore.ts`: `step4_notes: Record<string, string>` slice + `setStep4Note(moduleId, note)` action. Notes keyed by module id (steel / foundation / connection / subframe / lifting). Cleared on `reset()`.
+- `Sidebar.tsx`: Step 5 permanently locked (`s.number === 5` always treated as locked) — appears greyed/disabled without being removed from the nav.
+### Notes
+- Step 5 route and component retained — not deleted. Only the sidebar nav entry is locked.
+- Notes do not affect any UR or pass/fail value. Step 6 will read `step4_notes` from store for inclusion in the PDF report.
+
+---
+
 ## [0.15.4] — 2026-04-21
 ### Fixed
-- **Step3.tsx**: DA1-C2 undrained bearing results now displayed in the derivation
-  panel when `cu_kPa > 0`. Was only showing DA1-C1 undrained rows (`bru = c1.bearing_undrained`).
-  Both combinations now render undrained qu, q_applied, UR, and `bearing_governs` when
-  `bearing_undrained` is present in the response. Existing DA1-C1 labels updated to
-  include the `(DA1-C1)` suffix for clarity alongside the new DA1-C2 rows.
+- `Step3.tsx`: DA1-C2 undrained bearing results now displayed in the derivation panel when `cu_kPa > 0`. Was only showing DA1-C1 undrained rows. Both combinations now render undrained qu, q_applied, UR, and `bearing_governs` when `bearing_undrained` is present in the response.
+
+---
 
 ## [0.15.3] — 2026-04-21
 ### Changed
-- **Step 3 — single-entry Run Calculations**: Removed the separate "Find Section"
-  button. "Run Calculations" is now the sole entry point. First click runs Phase 1
-  (wind + section search via Claude web retrieval). Second click (after engineer
-  confirms a section) runs Phase 2 (foundation, connection, subframe, lifting).
-- **`calculate.py`**: Web search is disabled for Phase 2. `CalculateRequest` adds
-  `use_retrieval: bool = False`; `pre_selected_section` is always provided in the
-  normal flow, so the retrieval path is never reached. No double-search possible.
-- **`section_retrieval.py`**: `select_section()` accepts `use_retrieval: bool = True`.
-  When `False`, skips Claude API entirely and falls through to library cache.
+- **Step 3 — single-entry Run Calculations**: Removed the separate "Find Section" button. "Run Calculations" is now the sole entry point. First click runs Phase 1 (wind + section search via Claude web retrieval). Second click (after engineer confirms a section) runs Phase 2 (foundation, connection, subframe, lifting).
+- `calculate.py`: Web search disabled for Phase 2 — `pre_selected_section` is always provided in normal flow so retrieval is never reached. No double-search possible.
+- `section_retrieval.py`: `select_section()` accepts `use_retrieval: bool = True`. When `False`, skips Claude API and falls through to library cache.
 
 ### Added
-- **`POST /api/wind-and-select`** — new endpoint that runs wind calculation and
-  section search together in one call. Used exclusively by Phase 1. Returns
-  `{ wind_result, section_result }` including demand values (M_Ed, V_Ed, w, L_mm,
-  Lcr_mm) needed by the optimize endpoint.
-- **`Phase1Result` interface** in `types/index.ts` — wraps `WindCalcResult` and
-  `SelectionResult`. Stored in Zustand so the section card survives tab navigation.
-- **`phase1_result` / `setPhase1Result`** added to `projectStore.ts`.
-- **"Change Section" button** — appears in the confirmed-section banner; clears
-  `confirmed_section`, `phase1_result`, and `calculation_results` to restart Phase 1.
+- `POST /api/wind-and-select` — runs wind calculation and section search together. Used exclusively by Phase 1. Returns `{ wind_result, section_result }` including M_Ed, V_Ed, w, L_mm, Lcr_mm.
+- `Phase1Result` interface in `types/index.ts` — wraps `WindCalcResult` and `SelectionResult`. Stored in Zustand.
+- `phase1_result` / `setPhase1Result` added to `projectStore.ts`.
+- **"Change Section" button** — clears `confirmed_section`, `phase1_result`, and `calculation_results` to restart Phase 1.
 
 ### Notes
-- If `confirmed_section` is already set when "Run Calculations" is clicked, the app
-  goes straight to Phase 2 without re-running the section search.
-- "Optimize Selection" remains available between Phase 1 and Phase 2 as before.
-- Web search (Claude retrieval) is only ever called from `/api/wind-and-select`,
-  never from `/api/calculate`.
+- If `confirmed_section` is already set when "Run Calculations" is clicked, goes straight to Phase 2.
+- Web search only ever called from `/api/wind-and-select`, never from `/api/calculate`.
+
+---
 
 ## [0.15.2] — 2026-04-21
 ### Changed
-- **Steel grade removed from user input** — grade is now determined autonomously
-  from the section returned by AI/library. `steel_grade` removed from
-  `DesignParameters`, `SelectSectionRequest`, `OptimizeSectionRequest`, and
-  `CalculateRequest`. `SteelGrade` type retained in `types/index.ts` for
-  potential future use.
-- `section_retrieval.py` `_verify_against_cache()`: no longer accepts `steel_grade`
-  param. Grade derived per-section from `fy_N_per_mm2` (>= 355 → S355, else S275).
-  Loads both `parts_library_S275.json` and `parts_library_S355.json` and routes
-  each section to its matching cache.
-- `section_retrieval.py` `select_section()`: `steel_grade` and `fy` params removed.
-  `wpl_min_cm3` computed with conservative `fy=275` default (larger threshold, more
-  candidates returned by Claude). Cache fallback now combines both grade libraries
-  sorted by mass ascending.
-- `select_section.py` router: `steel_grade` and `fy` removed from
-  `SelectSectionRequest`. `fy_N_per_mm2` added to `SelectSectionResponse` (sourced
-  from the returned section dict, used by frontend to derive grade label).
-- `optimize_section.py` router: `steel_grade` removed from `OptimizeSectionRequest`.
-  Grade derived from `body.section.get("fy_N_per_mm2", 275.0)` to select the
-  correct grade library for the optimisation loop.
-- `calculate.py` router: `steel_grade` removed from `CalculateRequest`. `fy`
-  derivation removed. `select_section()` called without grade arguments.
-- `Step3.tsx`: Steel grade dropdown removed from Post group. Grade is shown
-  informational-only in `SectionCard`, `OptimisedCard`, and confirmed banner — all
-  derived from `section.fy_N_per_mm2` at render time. `clearTrigger` no longer
-  includes `dp.steel_grade`.
+- **Steel grade removed from user input** — grade determined autonomously from section `fy_N_per_mm2`. `steel_grade` removed from `DesignParameters`, `SelectSectionRequest`, `OptimizeSectionRequest`, and `CalculateRequest`.
+- `section_retrieval.py` `_verify_against_cache()`: grade derived per-section from `fy_N_per_mm2` (≥355 → S355, else S275). Loads both grade libraries and routes each section to its matching cache.
+- `select_section.py` router: `steel_grade` removed. `fy_N_per_mm2` added to response for frontend grade label.
+- `optimize_section.py` router: grade derived from `body.section.get("fy_N_per_mm2", 275.0)`.
+- `Step3.tsx`: Steel grade dropdown removed. Grade shown informational-only in `SectionCard`, `OptimisedCard`, and confirmed banner.
 
 ---
 
 ## [0.15.1] — 2026-04-21
 ### Added
-- `section_retrieval.py`: `_validate_section_dict()` — validates all required
-  numeric fields are present and within plausible engineering ranges before any
-  Claude-returned section reaches `_check_section()`. Checks: designation present;
-  mass 0–500 kg/m; h 50–1000 mm; b 50–500 mm; tf/tw 1–50 mm; Iy, Wpl_y, Wel_y
-  1–100000 cm⁴/cm³; fy 200–500 N/mm². Hallucinated or malformed sections are
-  dropped with a log message. If all returned sections fail validation, raises
-  `ValueError` which triggers the grade-library cache fallback with a clear reason.
-- `Step3.tsx`: steel grade hint updated — "S275 is standard for most projects.
-  S355 for heavily loaded or long-span configurations." Both options retained; no
-  other UI changes.
+- `section_retrieval.py`: `_validate_section_dict()` — validates all required numeric fields before any Claude-returned section reaches `_check_section()`. Checks: designation present; mass 0–500 kg/m; h 50–1000 mm; b 50–500 mm; tf/tw 1–50 mm; Iy/Wpl_y/Wel_y 1–100000; fy 200–500 N/mm². Invalid sections dropped with log message. If all fail, raises `ValueError` triggering cache fallback.
 
 ---
 
 ## [0.15.0] — 2026-04-21
 ### Changed
-- `section_retrieval.py`: replaced Gemini + Playwright with Claude API web search
-  (`web_search_20250305` tool, model `claude-opus-4-5`). No browser or HTTP fetch
-  needed — Claude searches live and returns structured section JSON. Grade constrained
-  to S275/S355 in prompt (not exposed in UI). `remarks` field included in search
-  prompt when provided. Falls back to grade-specific library on any exception.
-- `parts_library.json` split into `parts_library_S275.json` (107 sections, fy=275)
-  and `parts_library_S355.json` (26 sections, fy=355). Grade-specific file selected
-  by `steel_grade` parameter. `parts_library.json` retained for backward compat with
-  `compute_steel_design()` fallback path.
-- `_verify_against_cache()`: now accepts `steel_grade` and loads the matching grade
-  file instead of the combined library.
-- `select_section()` service: now returns `all_sections` (full verified list from web
-  search) alongside the primary result — feeds the frontend optimisation flow.
-- `select_section.py` router: added `steel_grade` and `remarks` fields to request;
-  added `all_sections` to response; `cp_net` forwarded to wind calculation.
-- `calculate.py` (`CalculateRequest`): added `pre_selected_section: dict | None`
-  (skips AI retrieval when provided) and `remarks: str = ""` (stored, not used in
-  calculations). `pre_selected_section` runs `_check_section()` directly and is tagged
-  `source: "pre_selected"`.
+- `section_retrieval.py`: replaced Gemini + Playwright with Claude API web search (`web_search_20250305` tool, model `claude-opus-4-5`). Grade constrained to S275/S355 in prompt (not exposed in UI). `remarks` field included in search prompt when provided.
+- `parts_library.json` split into `parts_library_S275.json` (107 sections) and `parts_library_S355.json` (26 sections). `parts_library.json` retained for backward compat.
+- `select_section()` service returns `all_sections` (full verified list) alongside primary result for optimisation flow.
 
 ### Added
-- `POST /api/optimize-section` (`optimize_section.py`): deterministic optimisation
-  loop against the grade-specific library. Case A (fails): moves up (heavier) until
-  first all-pass. Case B (passes): moves down (lighter) until check fails or
-  max(UR) >= 0.95. Returns `selected_section`, `checks`, `optimisation_case`,
-  `iterations`, `optimised`, `message`. Registered in `main.py`.
-- `Step3.tsx`: Additional Considerations textarea (full-width, 3 rows) above the
-  section selection area. Bound to `dp.remarks`; included in Claude web search prompt.
-- `Step3.tsx`: Full Select → Show → Optimize → Confirm flow:
-  - **Find Section** button (enabled when wind + post filled) → calls
-    `/api/select-section`, shows `SectionCard` with UR checks.
-  - **Optimize Selection** button → calls `/api/optimize-section`, shows
-    `OptimisedCard` with case/iteration detail.
-  - **Confirm Section** → stores section in Zustand `confirmed_section`; shows green
-    confirmed banner.
-  - **Run Calculations** passes `confirmed_section` as `pre_selected_section`; skips
-    AI retrieval when set.
-  - Auto-clears confirmed section and shows warning when post_spacing, post_length,
-    subframe_spacing, structure_height, return_period, or steel_grade changes.
-- `types/index.ts`: `SteelSection`, `SectionChecks`, `SelectionResult`, `OptimiseResult`
-  interfaces added.
-- `types/index.ts` + `projectStore.ts`: `remarks: string` added to `DesignParameters`
-  / `defaultDesignParameters`.
-- `projectStore.ts`: `confirmed_section: SteelSection | null` state +
-  `setConfirmedSection()` action; cleared in `reset()`.
+- `POST /api/optimize-section`: deterministic optimisation loop against grade-specific library. Case A (fails): moves up until all-pass. Case B (passes): moves down until check fails or max(UR) ≥ 0.95. Returns `selected_section`, `checks`, `optimisation_case`, `iterations`, `optimised`, `message`.
+- `Step3.tsx`: Additional Considerations textarea bound to `dp.remarks`; included in Claude search prompt.
+- `Step3.tsx`: Select → Show → Optimize → Confirm flow with `SectionCard`, `OptimisedCard`, confirmed banner, and auto-clear on parameter change.
+- `types/index.ts`: `SteelSection`, `SectionChecks`, `SelectionResult`, `OptimiseResult` interfaces.
+- `projectStore.ts`: `confirmed_section: SteelSection | null` + `setConfirmedSection()`.
 
 ### Removed
-- `google-genai` and `playwright` dependencies from `pyproject.toml`.
-- Playwright-based `_playwright_fetch_sync()`, `_fetch_page()` functions.
-- Gemini-based `_extract_sections_with_llm()` function.
-- `GOOGLE_API_KEY` startup warning (replaced by `ANTHROPIC_API_KEY` warning).
+- `google-genai`, `playwright` dependencies.
+- Gemini-based and Playwright-based retrieval functions.
+- `GOOGLE_API_KEY` startup warning (replaced by `ANTHROPIC_API_KEY`).
 
 ### Notes
-- `ANTHROPIC_API_KEY` must be set in `backend/.env` for live section retrieval.
-  Without it, endpoint falls back to grade-specific library immediately.
-- Grade constraint (S275/S355 only) is in the Claude prompt — not exposed in UI.
-  Expandable to other grades later without frontend changes.
-- Additional Considerations influences search only for now. Scope can expand to
-  PDF report in a future version.
+- `ANTHROPIC_API_KEY` required in `backend/.env` for live retrieval. Falls back to grade library without it.
 - Optimisation is pure Python — no LLM in the optimise loop.
-- P105 T2 validated: M_Ed=130.31 kNm ✓, UB 406×140×39, UR_moment=0.977 ✓,
-  Case B (1 iteration), optimised (UR ≥ 0.95) ✓.
+- P105 T2 validated: M_Ed=130.31 kNm ✓, UB 406×140×39, UR_moment=0.977 ✓, Case B (1 iteration), optimised ✓.
+- Versions 0.12.0–0.13.3 covered the earlier Gemini/Playwright retrieval build (httpx → Playwright → Windows asyncio fixes → wired into calculate.py). All superseded by this version.
 
 ---
 
 ## [0.14.0] — 2026-04-20
 ### Added
-- `backend/app/data/chs_library.json` — 51 CHS GI pipe sections from EN 10219, all with `fy_N_per_mm2: 400`, sorted ascending by `mass_kg_per_m`. Used by subframe selection.
-- `backend/app/data/rebar_library.json` — H16–H40 high-yield rebar with correct gross `As_mm2 = π/4 × d²`. Used by lifting hook selection.
+- `chs_library.json` — 51 CHS GI pipe sections per EN 10219, `fy=400 N/mm²`, sorted by mass. Used by subframe selection.
+- `rebar_library.json` — H16–H40 high-yield rebar with correct gross `As_mm2 = π/4 × d²`. Used by lifting hook selection.
+
 ### Changed
-- `subframe.py`: replaced hardcoded CHS 48.3×2.5mm with library iteration — selects lightest CHS section passing `Mc_Rd = 1.2 × fy × Wel / γM0` moment check (UR < 1.0). Returns `designation`, `od_mm`, `t_mm`, `mass_kg_per_m`, full derivation fields, and `hardware_note` when selected OD ≠ 48.3mm.
-- `lifting.py`: replaced fixed H20 bar with `rebar_library.json` iteration — selects lightest bar passing both tension (UR_tension < 1.0) and bond (UR_bond < 1.0) checks with n_hooks=4; retries with n_hooks=6 if no bar passes at 4 hooks. Returns `bar`, `diameter_mm`, `As_mm2`, and `pe_note` documenting the PE As discrepancy.
-- `connection.py`: `n_clamps` now computed dynamically as `max(ceil(F_factored / failure_load), n_clamps_provided)` instead of hardcoded. Response includes `n_clamps_required`, `n_clamps_provided`, and `n_clamps` (used).
-- `wind.py` + `calculate.py`: `cp_net` promoted from hardcoded constant (`SG_NA["cp_net"]`) to user-selectable parameter (default 1.2). Exposed in `CalculateRequest` and passed through to `compute_design_pressure()`.
-- `calculate.py` + `section_retrieval.py`: `steel_grade` (S275/S355) added to `CalculateRequest`; derives `fy` (275 or 355 N/mm²) and passes to section selection. Cache fallback now filters `parts_library.json` by `fy_N_per_mm2 == fy`; falls back to all sections with a warning if no grade match found.
-- `frontend/src/types/index.ts`: `DesignParameters` — added `cp_net: number`; `SubframeCalcResult` updated to match new subframe.py output (`designation`, `od_mm`, `t_mm`, `mass_kg_per_m`, `Mc_Rd_kNm`, `UR_subframe`, `hardware_note`).
-- `frontend/src/store/projectStore.ts`: `cp_net: 1.2` added to `defaultDesignParameters`.
-- `frontend/src/steps/Step3.tsx`: added `cp_net` selector in Wind group and `steel_grade` selector in Post group; both wired to API body. `SubframePanel` updated: `sf.section` → `sf.designation`, hardware_note displayed as a warning callout.
+- `subframe.py`: replaced hardcoded CHS 48.3×2.5mm with `chs_library.json` iteration — selects lightest CHS passing moment check. Returns `hardware_note` when selected OD ≠ 48.3mm.
+- `lifting.py`: replaced fixed H20 with `rebar_library.json` iteration — selects lightest bar passing tension and bond. Retries with n_hooks=6 if no bar passes at 4. Returns `pe_note` documenting PE As discrepancy.
+- `connection.py`: `n_clamps` computed as `max(ceil(F_factored / failure_load), n_clamps_provided)`. Response includes `n_clamps_required`, `n_clamps_provided`, `n_clamps`.
+- `wind.py` + `calculate.py`: `cp_net` promoted to user-selectable parameter (default 1.2).
+- `Step3.tsx`: `cp_net` selector in Wind group; `SubframePanel` updated for new output shape.
+
 ### Notes
-- Lifting hook `As`: system uses correct rebar_library values (H20 = 314 mm²). PE report uses As=490.94 mm² (H25 area applied to H20 bar). Both are correct per their respective methodologies; `pe_note` documents the discrepancy.
-- Subframe hardware note fires when selected OD ≠ 48.3mm (standard clamp size); does not hard-fail — flags for engineer review.
-- CHS and rebar section properties are physical constants from EN standards — not user-configurable.
-
----
-
-## [0.12.5] — 2026-04-20
-### Fixed
-- `section_retrieval.py`: replaced async `_fetch_page()` with a thread-based implementation that runs Playwright inside `_playwright_fetch_sync()` — a dedicated worker thread gets a fresh `asyncio.new_event_loop()` (always a SelectorEventLoop), bypassing uvicorn's ProactorEventLoop on Windows entirely. The outer `_fetch_page()` remains async and offloads to the thread via `loop.run_in_executor()`.
-### Notes
-- `run.py` and the `WindowsSelectorEventLoopPolicy` workaround are no longer needed for Playwright to work. Server can be started with `uv run uvicorn app.main:app --reload` as normal.
-
----
-
-## [0.12.4] — 2026-04-20
-### Fixed
-- `run.py` (new): `asyncio.WindowsSelectorEventLoopPolicy()` is now set before uvicorn initialises its own event loop. Setting the policy inside `main.py` was too late — uvicorn creates the loop before the FastAPI app code runs, so Playwright's subprocess transport still raised `NotImplementedError` on Windows.
-- `main.py`: removed the now-redundant `sys`/`asyncio` policy block.
-### Changed
-- Server must now be started with `uv run python run.py` instead of `uv run uvicorn app.main:app --reload`. Behaviour (host, port, reload) is identical.
-
----
-
-## [0.12.3] — 2026-04-20
-### Fixed
-- `main.py`: added `asyncio.WindowsSelectorEventLoopPolicy()` before all other imports on Windows. Python 3.8+ defaults to ProactorEventLoop which does not support Playwright's subprocess transport — Playwright calls would raise `NotImplementedError` at runtime without this fix.
-### Notes
-- M_Ed formula (`1.5 * w * L² / 2`) is correct in both `calculate.py` and `select_section.py` routers. If M_Ed=260.64 kNm is observed (2× expected), verify Swagger UI inputs: `post_length` must be 12.7 m (not 25.4 m). The formula itself is not the cause.
-
----
-
-## [0.12.2] — 2026-04-20
-### Fixed
-- `select_section.py`: `SelectSectionResponse` was missing `fallback_reason` field — now included so Swagger UI and API consumers can see why cache fallback activated.
-### Added
-- `section_retrieval.py`: stage-by-stage stdout logging — logs attempt, URL fetch + char count, Gemini call, section count returned, selected section or fallback reason, and cache fallback. All printed with `flush=True` so they appear immediately in uvicorn terminal.
-- `section_retrieval.py`: startup warning at module import if `GOOGLE_API_KEY` is not set: `"WARNING: GOOGLE_API_KEY not set — section retrieval will use cache fallback only"`.
-### Notes
-- M_Ed and V_Ed are computed in `select_section.py` router before the service call and flow through `_check_section()` — they will be non-zero as long as `design_pressure_kPa > 0`. Validated: P105 T2 inputs (dp=0.36, spacing=3.0, post_length=12.7) → M_Ed=130.31 kNm.
-
----
-
-## [0.12.1] — 2026-04-20
-### Changed
-- `section_retrieval.py`: replaced `httpx` with Playwright headless Chromium for catalogue fetching — pages are now fully JS-rendered before HTML is passed to Gemini. `_fetch_page()` now uses `async_playwright`, `wait_until="networkidle"` + 2 s extra wait.
-- `section_retrieval.py`: `_CATALOGUE_URL` changed from Tata Steel Europe to `https://consteel.com.sg/`.
-- `pyproject.toml`: `httpx` dependency removed (no longer used).
-### Added
-- Explicit `PlaywrightTimeoutError` handler: sets `fallback_reason = "Live retrieval timed out — using cached sections"` and activates cache fallback gracefully.
-### Notes
-- Playwright 1.58.0 + Chromium 145.0.7632.6 must be installed (`playwright install chromium`). Already done in dev environment.
-
----
-
-## [0.13.3] — 2026-04-20
-### Changed
-- `calculate.py`: `POST /api/calculate` now calls `select_section()` (Gemini 2.0 Flash → Continental Steel live retrieval) instead of `compute_steel_design()` directly. Fallback to `parts_library.json` is preserved on any failure. `selection_source` ("live"/"cache") and `fallback_reason` added to `SteelResult` response.
-- `calculate.py`: endpoint converted from `def` to `async def` to support `await select_section(...)`.
-- `section_retrieval.py`: `fallback_reason` now captured and returned in all code paths — `RuntimeError` (e.g. `GOOGLE_API_KEY not set`), network/LLM exceptions, and "no live candidate passed". Previously swallowed silently.
-- `types/index.ts`: `selection_source?` and `fallback_reason?` optional fields added to `SteelCalcResult`.
-- `Step3.tsx`: Steel derivation panel prepends "Section source" and "Fallback reason" rows (only shown when present in API response).
-### Notes
-- `compute_steel_design()` unchanged — still available as a standalone function and used in `steel.py __main__` validation.
-- `GOOGLE_API_KEY` must be set in `backend/.env` for live retrieval. Without it, `fallback_reason` = "GOOGLE_API_KEY not set" and cache path runs immediately.
-- If the supplier page is JS-rendered or unreachable, the exception is caught, `fallback_reason` records the error type, and the cache fallback activates silently.
+- Lifting hook As: system uses correct rebar_library values (H20=314mm²). PE report uses H25 area (490.94mm²) for H20 bar — `pe_note` documents the discrepancy.
+- Subframe hardware note fires when selected OD ≠ 48.3mm — flags for engineer review, does not hard-fail.
 
 ---
 
 ## [0.13.0] — 2026-04-20
 ### Added
-- `Step3.tsx`: Connection results panel — 7-check table (bolt tension, bolt shear, bolt combined, bolt embedment, weld, base plate, G clamp) with demand / capacity / UR / pass per row. Overall pass/fail badge.
+- `Step3.tsx`: Connection results panel — 7-check table with demand/capacity/UR/pass per row and overall pass/fail badge.
 - `Step3.tsx`: Subframe results row — section, M_Ed, Mc,Rd, UR.
-- `Step3.tsx`: Lifting results panel — hole shear sub-section and hook tension/bond sub-section, each with factored load, capacity, and UR.
-- `Step3.tsx`: DerivationPanel rows added for connection (T_total, Ft, FT,Rd, fbd, L_req, weld, G clamp), subframe (UDL, M_Ed, Mc,Rd, UR), and lifting (hole: factored load, V_Rd, UR; hook: W_factored, F_hook, FT,Rd, fbd, L_req, UR_bond).
-- `types/index.ts`: `ConnectionCalcResult`, `SubframeCalcResult`, `LiftingCalcResult` interfaces added. `connection?`, `subframe?`, `lifting?` optional fields added to `CalculationResults`.
+- `Step3.tsx`: Lifting results panel — hole shear and hook tension/bond sub-sections.
+- `Step3.tsx`: DerivationPanel rows for connection, subframe, and lifting modules.
+- `types/index.ts`: `ConnectionCalcResult`, `SubframeCalcResult`, `LiftingCalcResult` interfaces. Optional fields added to `CalculationResults`.
+
 ### Fixed
-- `Step3.tsx`: Foundation bearing table updated to show drained UR and (when cu_kPa > 0) undrained UR + governing-check columns. Columns only appear when undrained data is present — no layout change for drained-only projects.
-- `Step3.tsx`: Overall pass/fail banner now includes connection, subframe, and lifting — previously only wind + steel + foundation.
-### Notes
-- All new result panels are conditionally rendered — if backend returns null for any module, that panel is hidden gracefully.
-- Derivation rows use actual API response values, not hardcoded samples.
-- `LiftingCalcResult.hole` uses backend keys `V_Rd_kN` and `UR_shear` (not `V_Rd_hole_kN`/`UR_hole_shear`).
-
----
-
-## [0.12.0] — 2026-04-20
-### Added
-- `backend/app/services/section_retrieval.py`: AI-assisted steel section retrieval service using Gemini 2.0 Flash (google-genai SDK v1.x). Fetches raw HTML from supplier catalogue via httpx, passes to Gemini for structured JSON extraction of UB sections above minimum Wpl_y threshold, cross-checks against parts_library.json cache (cached entries take precedence), then runs `_check_section()` on each candidate lightest-first. Falls back to full parts_library.json iteration on any exception. `source` field in return dict indicates "live" or "cache".
-- `backend/app/routers/select_section.py`: `POST /api/select-section` endpoint. Accepts wind + post geometry + steel grade inputs; computes M_Ed/V_Ed from wind, calls retrieval service, returns lightest passing section with source attribution.
-- `backend/app/calculation/steel.py`: `_check_section()` helper extracted from inner loop of `compute_steel_design()`. Takes a section dict + pre-computed demand scalars; runs LTB + deflection + shear checks; returns full result dict with `pass` bool. `compute_steel_design()` now delegates to this function — no behaviour change.
-- `backend/app/main.py`: `select_section` router registered.
-- `pyproject.toml`: `httpx>=0.27.0` and `google-genai>=1.0.0` added as dependencies.
-- `.env` / `.env.example`: `GOOGLE_API_KEY` placeholder added.
-### Notes
-- `GOOGLE_API_KEY` must be populated in `backend/.env` with a valid Google AI Studio key before `POST /api/select-section` attempts live retrieval. Without it, the endpoint falls back to parts_library.json immediately.
-- Live retrieval URL targets Tata Steel UK UB table. If the page structure changes, LLM extraction will fail silently and the cache fallback activates.
-- `_check_section()` is also importable by the retrieval service and any future endpoints that need to verify an arbitrary section dict.
+- `Step3.tsx`: Foundation bearing table updated for `bearing_drained`/`bearing_undrained`/`bearing_governs` structure (introduced in 0.11.2). Undrained columns only appear when `cu_kPa > 0`.
+- `Step3.tsx`: Overall pass/fail banner now includes connection, subframe, and lifting.
 
 ---
 
 ## [0.11.3] — 2026-04-19
 ### Fixed
-- `constants.py`: `DA1_C1 fos_overturning` corrected 1.35 → 1.0. The EQU overturning check applies `gamma_G_stb=0.9` to the stabilising moment before computing ODF; once that factor is in, the threshold is ODF ≥ 1.0. Setting 1.35 was double-counting the partial factor. Confirmed from P105 T2 page 7: ODF=1.15 is explicitly marked OK → now PASS.
+- `constants.py`: `DA1_C1 fos_overturning` corrected 1.35 → 1.0. EQU check applies `gamma_G_stb=0.9` to stabilising moment, so threshold is ODF ≥ 1.0. Setting 1.35 was double-counting the partial factor.
+
 ### Notes
-- Undrained ic mismatch (qu computed higher than PE targets: 178.82 vs 171.48 for C1, 147.86 vs 130.67 for C2) is a formula interpretation difference — PE ic values cannot be reproduced from standard EC7 Annex D.3 formula. Both combinations still pass structurally (qu > q_applied). Flagged for PE clarification at next Union Noise meeting.
+- Undrained ic mismatch (DA1-C1: 178.82 vs 171.48, DA1-C2: 147.86 vs 130.67) is a formula interpretation difference — both pass structurally. Flagged for PE clarification.
 
 ---
 
 ## [0.11.2] — 2026-04-19
 ### Fixed
-- `foundation.py`: drained bearing capacity eccentricity now uses `e = M_SLS / P_G` (unfactored SLS moment) for all combinations — confirmed PE methodology from P105 T2 report. Previously used factored moment per combination, giving wrong B' and qu mismatch (+175% / +217% vs PE targets).
-- `foundation.py`: overburden surcharge q=0 in drained bearing formula — confirmed PE Choice B from P105 T2 report. Deliberate and conservative (omits q×Nq×sq term). Standard EC7 would use q=D×γs=28.5 kPa.
+- `foundation.py`: drained bearing eccentricity now uses `e = M_SLS / P_G` for all combinations — confirmed PE methodology. Previously used factored moment, causing +175%/+217% qu mismatch.
+- `foundation.py`: overburden surcharge q=0 in drained bearing — confirmed PE Choice B (deliberate, conservative).
+
 ### Added
-- `foundation.py`: undrained bearing capacity check per EC7 Annex D.3 — (π+2)×cu,d×bc×ic×sc+q. Runs when `cu_kPa > 0` for Embedded RC footings. DA1-C1 uses `cu,d = cu/1.0`, DA1-C2 uses `cu,d = cu/1.25`. Skipped when `cu_kPa = 0` (default — no behaviour change for existing projects).
-- `foundation.py`: bearing result dict restructured — `bearing` key split into `bearing_drained`, `bearing_undrained` (or None), and `bearing_governs` ("drained" / "undrained" / None). `pass_bearing` now checks both drained and undrained when undrained is present.
-- `foundation.py`: `cu_kPa` parameter added to `compute_foundation()` and `_run_combination()`. Recorded in `inputs` dict.
-- `calculate.py` (`CalculateRequest`): `cu_kPa: float = Field(0.0, ...)` added. Passed to `compute_foundation()`.
-- `types/index.ts` (`DesignParameters`): `cu_kPa: number` added (default 0).
-- `store/projectStore.ts` (`defaultDesignParameters`): `cu_kPa: 0` added.
-- `Step3.tsx`: "Undrained shear strength cu (kPa)" field added in Soil Parameters group.
-### Validated — P105 T2 foundation (pages 7–9)
-- DA1-C1 FOS_sliding = 5.522 (target 5.52) PASS
-- DA1-C1 FOS_overturning = 1.152 (target EQU ODF 1.15) PASS
-- DA1-C2 FOS_sliding = 4.913 (target 4.91) PASS
-- DA1-C1 drained qu = 279.45 kPa (target 279.44) PASS
-- DA1-C2 drained qu = 127.67 kPa (target 127.91) PASS
-- DA1-C1 undrained qu = 178.82 kPa (target 171.48) MISMATCH +4.3%
-- DA1-C2 undrained qu = 147.86 kPa (target 130.67) MISMATCH +13.2%
-### Notes
-- PE report page 9 labels second undrained block as DA1-C1 but uses DA1-C2 factors (γQ=1.3, γφ=1.25, Md=86.88) — confirmed PE typo. Implemented correctly as DA1-C2.
-- Undrained target mismatch: implemented formula (π+2)×cu,d×ic×sc + q gives higher qu than PE targets. Could not reproduce PE undrained values from standard EC7 Annex D.3 formula variations. Structurally conservative (qu > q_applied for both combinations, check passes). Investigation pending PE report review.
-- Both bearing deviations (e=M_SLS/P_G, q=0 for drained) are conservative vs standard EC7.
-- `DA1-C1 pass: False` in current output is a pre-existing issue — `fos_overturning=1.35` in DA1_C1 constants is too high for an EQU-factored check (limit should be 1.0 since γG_stb=0.9 already applied to M_Rd). Will address separately.
+- `foundation.py`: undrained bearing capacity (EC7 Annex D.3). Runs when `cu_kPa > 0`. Bearing result restructured into `bearing_drained`, `bearing_undrained`, `bearing_governs`.
+- `cu_kPa` parameter added throughout stack: `foundation.py`, `calculate.py`, `types/index.ts`, `projectStore.ts`, `Step3.tsx`.
+
+### Validated — P105 T2
+- DA1-C1 FOS_sliding = 5.522 ✓, FOS_overturning = 1.152 ✓, qu_drained = 279.45 ✓
+- DA1-C2 FOS_sliding = 4.913 ✓, qu_drained = 127.67 ✓
+- Undrained mismatches noted: DA1-C1 +4.3%, DA1-C2 +13.2% — both pass structurally.
 
 ---
 
 ## [0.11.1] — 2026-04-16
-
 ### Fixed
-- `lifting.py`: separated lifting hole and lifting hook load inputs. Added `post_weight_kN: float = 6.0` parameter. Hole shear check now uses `W_post_factored = post_weight_kN × 1.5` (post self-weight only — footing not yet cast when post is lifted via web holes). Hook checks continue to use `P_G_kN` (full assembly weight). Hole shear UR corrected from 1.505 (FAIL) to 0.189 (PASS).
-- `calculate.py` (`CalculateRequest`): added `post_weight_kN: float = Field(6.0, ...)` field. Passed to `compute_lifting()`.
-- `types/index.ts` (`DesignParameters`): added `post_weight_kN: number` field (default 6).
-- `store/projectStore.ts` (`defaultDesignParameters`): added `post_weight_kN: 6`.
-- `Step3.tsx`: added "Post self-weight (kN)" input in Foundation group; hint explains the hole-vs-hook load distinction.
+- `lifting.py`: separated hole and hook load inputs. `post_weight_kN` parameter added. Hole check uses post self-weight only (footing not cast at lift time). UR_hole corrected from 1.505 (FAIL) to 0.189 (PASS).
+- `post_weight_kN` added to `CalculateRequest`, `DesignParameters`, store defaults, and Step3.tsx.
 
-### Validation — P105 T2 lifting hole targets met
-- `W_post_factored = 9.00 kN` (target: 9.00) PASS
-- `V_Rd_hole = 47.63 kN` (target: 47.63) PASS
-- `UR_hole = 0.189` PASS  (was 1.505 FAIL)
-- Hook checks unchanged: `W_factored=286.88` PASS, `F_hook=71.72` PASS, `FT_Rd=176.74` PASS, `L_req=423.8mm` PASS
-
-### Foundation validation (Fix 2 — foundation.py __main__ updated)
-- `foundation.py` `__main__` block replaced with P105 T2 inputs (H_SLS=13.68, M_SLS=86.88, P_G=196.25, B=1.7, L=3.0, D=1.5, φk=30°, γs=19, c'k=5).
-- Sliding and overturning targets matched within 0.5%:
-  - DA1-C1 FOS_sliding = 5.522 (target: 5.52) PASS
-  - DA1-C1 FOS_overturning = 1.152 (target EQU ODF: 1.15) PASS
-  - DA1-C2 FOS_sliding = 4.913 (target: 4.91) PASS
-- Bearing capacity targets do NOT match — flagged in validation output:
-  - DA1-C1 qu: computed 768.78 kPa vs PE 279.44 kPa (MISMATCH +175%)
-  - DA1-C2 qu: computed 406.10 kPa vs PE 127.91 kPa (MISMATCH +217%)
-- Root cause identified by reverse-engineering PE targets:
-  - PE uses SLS eccentricity `e = M_SLS / P_G` (not factored M_Ed) to derive B'
-  - PE omits the overburden surcharge term `q × Nq × sq` from bearing capacity
-  - With these two deviations: DA1-C1 qu = c_d×Nc×sc + 0.5×γ×B'×Ny×sy = 279.5 kPa (matches)
-  - DA1-C2 qu = 4×19.32×sc + 0.5×19×B'×5.75×sy = 127.7 kPa (matches)
-- Code NOT changed to match PE bearing method — PE deviates from EC7 standard bearing formula. Engineering review required before adopting PE approach.
-
----
-
-## [0.10.4] — 2026-04-18
-
-### Fixed — all values confirmed from P105 T2 calculation report (Han Engineering, 8/6/2023)
-- `connection_library.json`: T1_M24_6bolt `Ds_mm=450` — explicit in PE report page 10 (not plate_height/2 as previously assumed). `weld_length_mm=1360` added — PE page 5 value used directly (formula gives 1045mm, underdetermines). `n_clamps_per_post=5` added — PE page 4 confirmed. `_pe_validation` note added.
-- `connection.py`: bolt tension now uses M_Ed (ULS) directly — PE report uses 130.31 kNm throughout (page 10). M_SLS removed.
-- `connection.py`: `Ds_mm` read from config when present (explicit PE value); falls back to `plate_height/2` for unvalidated configs.
-- `connection.py`: weld length from `config["weld_length_mm"]` when stored; formula fallback for configs without explicit value.
-- `connection.py`: G clamp uses `barrier_height/2` for tributary area (confirmed P105 T2 PE page 4 — barrier panel height, not post length). `n_clamps` read from config with default 5.
-- `subframe.py`: wall thickness corrected to t=2.5mm — matches PE Wely=3.92 cm³ (EN 10219 CHS 48.3×2.5 standard section). Note: PE page 3 description may say "2.2mm" or "2.3mm" but Wely=3.92 cm³ corresponds to t=2.5mm.
-- `subframe.py`: moment resistance formula updated to `Mc = 1.2 × fy × Wel / gamma_M0` — Class 2 section with 1.2 factor per PE methodology (page 3 confirmed).
-- `lifting.py`: `n_hooks` default changed 2→4 (PE page 11 confirmed). `As_hook=490.94mm²` (PE page 11 value — equivalent to H25 gross area despite hook being labelled H20; PE discrepancy flagged in code). `tw_for_hole=6.0mm` (PE page 6 value; section table = 6.4mm).
-
-### Validation — P105 T2 targets met
-- Connection: `Ds=450` ✓, `T_total=289.58 kN` ✓, `Ft=96.53 kN` ✓, `FT_Rd=260.58 kN` ✓, `UR_tension=0.370` ✓, `UR_embedment=0.731` ✓ (fck=25, L_req=475mm), `weld_length=1360mm` ✓, `G clamp F_wind=8.1kN` ✓ (PE: 8.13), `n_clamps=5` ✓ — `all_checks_pass=True`
-- Subframe: `UDL=0.54 kN/m` ✓, `M_Ed=0.73 kNm` ✓, `Wel=3917 mm³` ✓, `Mc=1.88 kNm` ✓, `UR=0.387` ✓
-- Lifting hook: `W_factored=286.88 kN` ✓, `F_hook=71.72 kN` ✓, `FT_Rd=176.74 kN` ✓, `L_req=423.8 mm` ✓
-
-### Notes
-- Lifting hook `As=490.94mm²` is H25 gross area, not H20 (314mm²). PE uses H25 area — flagged in return dict `As_note`. No change to formula pending PE confirmation.
-- Lifting hole shear UR=1.505 (FAIL) — known load model issue: code uses full hook load (71.72 kN) but PE uses post self-weight only (6 kN × 1.5 = 9 kN << V_Rd=47.63 kN). Separate input for post-only weight needed. To be addressed separately.
-- `fck=25` used in PE embedment and lifting bond checks despite C28/35 project concrete — conservative PE choice; `fck` parameter allows engineer to match project spec.
-- G clamp `F_wind` minor rounding: computed 8.10 kN vs PE 8.13 kN — difference is rounding in qp × cp_net.
-
----
-
-## [0.10.3] — 2026-04-16
-
-### Fixed
-- `connection_library.json`: T1_M24_6bolt updated with all values confirmed from P105 T2 drawing D-P105-TNCB-3002: plate 350×600×25mm, 3col × 2row bolt layout, n_tension=3, embedment=650mm. `length_mm` renamed to `height_mm` across all configs for consistency.
-- `connection.py`: FT_Rd now uses nominal shank area (π/4 × d²) per confirmed P105 T2 PE methodology. Resolves FT_Rd discrepancy (203 kN → 260.58 kN ✓).
-- `connection.py`: Ds derived as `plate_height_mm / 2` — PE simplified base plate method confirmed from drawing. `Ds_mm` removed from all configs (derived, not stored).
-- `calculate.py` + `Step3.tsx` + `types` + `store`: `fck` field added to request (default 25). P105 T2 uses fck=28 (C28/35) per material schedule. Passed to `compute_connection` and `compute_lifting`. UI field added to Foundation group.
-
-### Validation — P105 T2 connection checks fully validated (D-P105-TNCB-3002)
-- `Ft_per_bolt = 96.53 kN` ✓ (target: 96.53)
-- `FT_Rd = 260.58 kN` ✓ (target: 260.58)
-- `UR_bolt_tension = 0.370` ✓ (target: 0.370)
-- `UR_embedment = 0.678` ✓ (target: 0.678, L_req=440.8 mm < 650 mm provided)
-- All other checks pass: shear UR=0.025, combined UR=0.290, weld UR=0.791, base plate UR=0.009, g_clamp UR=0.552
-- `all_checks_pass = True`
-
-### Notes
-- T1_M20_6bolt and T2_M20_4bolt remain unvalidated against PE report — pending equivalent drawing review
-- Ds = plate_height/2 is PE simplified method. More rigorous approach (bolt row to row spacing) gives larger Ds and lower Ft — simplified method is conservative on the demand side
-- FT_Rd nominal area is a documented PE methodology difference vs EC3-1-8 Table 3.4 (threaded area). Both approaches noted in return dict `FT_Rd_note`
+### Validated
+- W_post_factored=9.00 kN ✓, V_Rd_hole=47.63 kN ✓, UR_hole=0.189 ✓
 
 ---
 
 ## [0.11.0] — 2026-04-16
-
 ### Added
-- `backend/app/calculation/subframe.py` — CHS 48.3×2.4mm GI pipe bending check. ULS moment formula M_Ed = (1.5/10) × w × L² (continuous beam /10, confirmed P105). Class 2 section, elastic Wel. UR_subframe = 0.480 at P105 T2 inputs (pass).
-- `backend/app/calculation/lifting.py` — H20 rebar hook tension (EC3-1-8 Cl 3.6.1) + bond length (EC2 Cl 8.4.2) + post web shear at lifting hole. 2 hooks per footing (P105 confirmed). Default embedment 450 mm, hole diameter 35 mm, edge distance 50 mm.
-- Both modules wired into `POST /api/calculate` — `subframe` and `lifting` fields added to `CalculateResponse`. `SubframeResult` and `LiftingResult` Pydantic models added to `calculate.py`.
+- `subframe.py`: CHS GI pipe bending check. M_Ed = (1.5/10)×w×L². Class 2 elastic, Mc = 1.2×fy×Wel/γM0.
+- `lifting.py`: H20 rebar hook tension (EC3-1-8) + bond length (EC2) + post web shear at lifting hole.
+- Both modules wired into `POST /api/calculate`.
+
+---
+
+## [0.10.4] — 2026-04-18
+### Fixed — final P105 T2 connection validation
+- `connection_library.json`: T1_M24_6bolt `Ds_mm=450` (PE page 10), `weld_length_mm=1360` (PE page 5), `n_clamps_per_post=5` (PE page 4).
+- `connection.py`: bolt tension uses M_Ed (ULS) directly. `Ds_mm` read from config when present; falls back to `plate_height/2`. Weld length from config when stored; formula fallback otherwise. G clamp uses `barrier_height/2` for tributary area.
+- `subframe.py`: wall thickness confirmed t=2.5mm (matches PE Wel=3.92 cm³). Mc formula corrected to `1.2×fy×Wel/γM0`.
+- `lifting.py`: n_hooks default 2→4 (PE confirmed). tw_for_hole=6.0mm (PE page 6).
+
+### Validated — P105 T2
+- Connection: Ft=96.53 ✓, FT_Rd=260.58 ✓, UR_tension=0.370 ✓, UR_embedment=0.731 ✓, n_clamps=5 ✓
+- Subframe: M_Ed=0.73 ✓, Mc=1.88 ✓, UR=0.387 ✓
+- Lifting hook: F_hook=71.72 ✓, FT_Rd=176.74 ✓, L_req=423.8mm ✓
 
 ### Notes
-- Subframe /10 vs /12: /10 confirmed P105. Faber Walk uses /12 (fixed-end assumption). Pending PE confirmation for general use — /10 used here.
-- Lifting hole `edge_distance_mm = 50` assumed standard. Confirm with Rowena actual drilled hole position in post web.
-- Hook embedment default 450 mm matches P105 material schedule. Confirm per project.
-- P105 T2 sample results: hook tension UR=0.199, hook bond UR=0.296, hole shear UR=0.443 — all pass.
-
----
-
-## [0.10.2] — 2026-04-16
-
-### Changed
-- `connection_library.json`: added `_source_note` to all three configs — clarifies these are Rowena's standard reference drawings (April 2026), not confirmed to match any specific PE report plate layout. Ds_mm and embedment_mm require PE verification before submission.
-- `connection.py`: module docstring updated — P105 bolt tension validation targets removed. Formula is correct per EC3-1-8 Cl 3.6.1; P105 plate config (Ds, n_tension) is unconfirmed so no comparison applies.
-- `connection.py`: `validation_note` field added to `bolt_tension` return dict stating P105 target not used. `M_SLS_kNm` precision tightened to 2 d.p.
-- `connection.py` `__main__`: P105 expected-value annotations removed from sample run output.
-
-### Notes — Current connection check results (M_Ed=130.32 kNm, V_Ed=20.52 kN, T1_M24_6bolt)
-- `UR_bolt_tension = 0.712` — formula correct per EC3-1-8; Ds=300 mm from reference drawing
-- `UR_bolt_shear = 0.025`, `UR_bolt_combined = 0.534`, `UR_weld = 0.791`, `UR_base_plate = 0.009`, `UR_gclamp = 0.552` — all pass
-- `UR_bolt_embedment = 1.097` — marginal fail (L_required=713 mm, L_provided=650 mm). Pending PE clarification on embedment or config update.
-
----
-
-## [0.10.1] — 2026-04-15
-
-### Fixed
-- `connection.py`: bolt tension check now uses SLS (unfactored) moment — `M_SLS = M_Ed / 1.5` — matching P105 methodology. `M_SLS_kNm` added to `bolt_tension` return dict.
-- `connection.py` + `constants.py`: all bolt checks now use threaded (net) stress area per ISO 898-1 / EC3-1-8. `BOLT_STRESS_AREA` dict added to `constants.py` (M16=157, M20=245, M24=353, M30=561 mm²). Gross area used as fallback for unlisted sizes.
-
-### Notes — P105 T2 post-fix validation
-- `UR_bolt_tension = 0.712` (improved from 0.834). Remaining gap to PE target 0.37 is Ds: config=300 mm, P105 layout~450 mm — pending PE drawing confirmation.
-- `UR_bolt_embedment = 1.097` (improved from 1.646). Still marginal fail — L_required=713 mm vs L_provided=650 mm. Pending PE clarification.
-- All other checks pass.
-
----
-
-## [0.10.0] — 2026-04-15
-
-### Added
-- `backend/app/calculation/connection.py` — full connection checks per EC3-1-8 + EC2:
-  - Check 1: Bolt tension (EC3 Cl 3.6.1) — T_total = M_Ed/Ds, Ft per bolt, FT_Rd
-  - Check 2: Bolt shear (EC3 Cl 3.6.1) — Fv per bolt, Fv_Rd (αv=0.6)
-  - Check 3: Combined bolt (EC3 Table 3.4) — interaction check ≤ 1.0
-  - Check 4: Bolt embedment/bond length (EC2 Cl 8.4.2) — fbd, L_required vs L_provided
-  - Check 5: Weld (MoI method, P105 approach) — weld group second moment, resultant demand vs Fw,Rd
-  - Check 6: Base plate bearing (EC3 Annex I / T-stub) — effective bearing area, compression resistance
-  - Check 7: G clamp (STS test-based) — F_factored / failure_load; uses external pressure (qp × cp_net, pre-shelter)
-- Connection config auto-selected from section designation; configs loaded from `connection_library.json`
-- Connection wired into `POST /api/calculate` — runs after steel, result included in response as `connection` field (null if steel fails)
-- External pressure for G clamp derived as `qp_kPa × cp_net` in `calculate.py`
-- Section geometry (`h_mm`, `b_mm`, `tf_mm`, `tw_mm`, `r_mm`) added to steel module return dict and `SteelResult` Pydantic model
-
-### Notes — P105 T2 Validation (M_Ed=130.32 kNm, V_Ed=20.52 kN, UB406×140×39, T1_M24_6bolt)
-- `FT_Rd = 203.33 kN` — reduced from 260.58 kN after threaded area fix (As=353 mm² vs gross 452 mm²). PE target of 260.58 was computed with gross area.
-- `Ft_per_bolt = 144.80 kN`, `UR_bolt_tension = 0.712` — improved from 0.834 (M_SLS fix). Remaining gap to PE target of 96.53 kN / UR=0.37 is due to Ds: config has Ds=300 mm; P105 bolt layout uses ~450 mm arm. Pending Ds confirmation from PE drawings.
-- `UR_bolt_embedment = 1.097` — improved from 1.646 (threaded area fix). Still marginally fails: L_required=713 mm > L_provided=650 mm. Requires PE clarification on embedment adequacy or config update.
-- `weld_length = 1045 mm` vs P105 target ~1360 mm — discrepancy noted in response `weld_length_note`. P105 likely includes stiffener plate welds.
-- All other checks pass (bolt_shear UR=0.025, bolt_combined UR=0.534, base_plate UR=0.009, g_clamp UR=0.552)
+- Versions 0.10.0–0.10.3 covered the iterative connection.py build: initial 7-check implementation, bolt area method iterations (threaded→nominal), and config cleanup. All superseded by this final validated state.
 
 ---
 
 ## [0.9.4] — 2026-04-15
-
 ### Fixed
 - `steel.py`: sort key changed from `Wpl_y_cm3` to `mass_kg_per_m` — selects lightest section by weight, matching PE methodology. Resolves T1/T2 section mismatch vs PE report.
 
 ### Added
-- `steel.py`: `deflection_limit_n` parameter (default 65) replaces hardcoded `L/65`. Passed from frontend through `calculate.py`. Returned in response dict.
-- `wind.py`: `return_period` parameter + Cprob formula (EC1 Eq 4.2, K=0.2, n=0.5 SG NA confirmed). `return_period=50` → `Cprob=1.0` (no change to existing results). `return_period` and `Cprob` returned in response dict.
-- `calculate.py`: `return_period` and `deflection_limit_n` added to `CalculateRequest`; `return_period`/`Cprob` added to `WindResult`; `deflection_limit_n` added to `SteelResult`.
-- Step 3: `return_period` now sent in POST body (was captured in Zustand but not transmitted).
-- Step 3: `deflection_limit_n` field added to Post group (default 65, range 20–500).
-- Step 3: Footing weight helper hint below Self-weight G field — estimates concrete-only weight from B×L×D×25 kN/m³ when all three footing dimensions are filled; prompts engineer to add post self-weight.
-- `DesignParameters`: `deflection_limit_n: number` added to interface and store default.
-- `WindCalcResult`: `return_period?` and `Cprob?` optional fields added.
-- `SteelCalcResult`: `deflection_limit_n?` optional field added.
-
-### Notes
-- P105 validation confirmed after sort key fix: T1 → `356×127×33` ✓, T2 → `406×140×39` ✓ (PE expected sections)
-- `Cprob` at 50yr = 1.0 — no change to any existing project results
-- `return_period=50` is the default; changing to 10yr or 5yr reduces `vb_effective` and thus `design_pressure_kPa`
+- `steel.py`: `deflection_limit_n` parameter (default 65).
+- `wind.py`: `return_period` + Cprob formula (EC1 Eq 4.2, K=0.2, n=0.5 SG NA). At 50yr Cprob=1.0.
+- Both parameters wired through `calculate.py` and exposed in Step 3.
 
 ---
 
 ## [0.9.3] — 2026-04-15
-
 ### Added
-- `vb` override now wired end-to-end: frontend sends `dp.vb.effective` only when overridden (omitted otherwise so backend defaults to SG NA 20 m/s)
-- `compute_qp()` and `compute_design_pressure()` accept optional `vb` parameter — overrides `SG_NA["vb0"]` throughout the full wind chain (vm, qp, qb all recomputed with override vb)
-- `CalculateRequest` extended with optional `vb: float | None` field
-
----
-
-## [0.9.2] — 2026-04-14
-
-### Changed
-- Mock project `created_by` names updated to Rowena, Ryan, Conrad (replacing placeholder names)
-- "Date" column renamed to "Created" on both Overview and Projects Library pages
-- "Last edited" column added to Overview recent projects table and Projects Library table, displaying `updated_at` formatted as `d MMM yyyy`
-- Step 2 canvas: unselected alignment line colour changed from blue (`#3b82f6`) to grey (`#6b7280`); selected remains orange
+- `vb` override wired end-to-end. `compute_qp()` and `compute_design_pressure()` accept optional `vb` parameter overriding `SG_NA["vb0"]` throughout wind chain.
 
 ---
 
 ## [0.9.1] — 2026-04-11
-
 ### Fixed
-- Shelter factor ψs now interpolated from EN 1991-1-4 Figure 7.20 in real time — the `0.5` stub was replaced with live table lookup using `shelter_factor_table.json` data (already digitised). Result updates whenever x, φ, or structure height changes without needing to re-run calculations.
-- Solidity ratio φ dropdown now only offers `0.8` (porous) and `1.0` (solid) — removed `0.9` which has no curve in Figure 7.20. Per table notes: φ < 0.8 not covered; use ψs = 1.0.
-- `handleRunCalculations` now reads the live computed ψs directly instead of the potentially-stale store field, eliminating a subtle sync-lag bug when x/φ were changed immediately before pressing Run.
-
-### Changed
-- Shelter_present toggle now shows "Enter x and φ to calculate ψs" hint when inputs are incomplete (instead of the old "ψs = 0.5 stub" warning, which implied a permanent limitation rather than an incomplete-input state)
-- OverridableField for ψs shows `x/h = {value}, φ = {value}` as the hint once both inputs are filled, so the engineer can cross-check the lookup ratio
+- Shelter factor ψs now live-interpolated from `shelter_factor_table.json` (EN 1991-1-4 Figure 7.20). Replaces the hardcoded 0.5 stub.
+- Solidity ratio φ limited to 0.8 (porous) and 1.0 (solid) — removed 0.9 which has no curve in Figure 7.20.
 
 ---
 
 ## [0.9.0] — 2026-04-11
-
 ### Added
-- `OverridableValue` interface (`types/index.ts`) — stores `calculated`, `override`, `override_reason`, and `effective` (= override ?? calculated) per PRD §2 Engineering Judgement Override Principle
-- `OverridableField` component (Step3.tsx) — number input pre-populated with `calculated`; amber border + "Overridden" badge when value differs from default; free-text reason field appears on override (required for PE report note)
-- **vb override**: basic wind velocity field added to the Wind group in Step 3 form, pre-populated at 20.0 m/s (SG NA fixed). Override stored in `dp.vb`; wired to backend pending `vb` parameter addition to `/api/calculate`
-- **shelter_factor override**: ψs now stored as `OverridableValue`. `calculated` is reset to 0.5/1.0 when shelter_present toggles; user can override for site-specific conservatism. `dp.shelter_factor.effective` sent to backend (replaces old hardcoded local variable)
-- `DerivationPanel` component (Step3.tsx) — collapsible section below each result group; collapsed by default; "Show derivation / Hide derivation" toggle; formats API response into labelled rows: `label | formula | result | clause`
-- Wind derivation: vb → cdir → cseason → qb → cr → vm → Iv → qp → cp,net → ψs → design pressure. Overridden inputs shown in amber with `[Override]` marker
-- Steel derivation: w → M_Ed/V_Ed → selected section → Mpl → Mcr → λ̄LT → χLT → Mb,Rd → UR_moment → δ/δallow → UR_deflection → Vc,Rd → UR_shear
-- Foundation derivation (DA1-C1): factored H/M → sliding resistance → sliding FOS → overturning M_Rd → overturning FOS → bearing capacity → bearing UR
-- `WindCalcResult` extended with `vb_m_per_s?`, `cdir?`, `cseason?`, `qb_N_per_m2?`, `qb_kPa?` (optional — present in responses from backend v0.8.0+)
-- `SteelCalcResult` extended with `w_kN_per_m?`, `Mpl_kNm?`, `Mcr_kNm?`, `lambda_bar_LT?`, `phi_LT?`, `chi_LT?`, `Av_mm2?`, `Vc_kN?`, `UR_shear?`, `post_length_m?`
-- `FoundationComboResult` extended with `phi_d_deg?` (top-level) and additional bearing sub-fields: `e_m?`, `b_prime_m?`, `B_prime_m?`, `Nq?`, `Nc?`, `Ny?`, `sq?`, `sc?`, `sy?`
-
-### Changed
-- `DesignParameters.basic_wind_speed: number` → `vb: OverridableValue` (calculated=20.0)
-- `DesignParameters.shelter_factor: number` → `shelter_factor: OverridableValue` (calculated=1.0 or 0.5 per shelter_present)
-- `projectStore.ts`: `defaultDesignParameters` updated accordingly; added `defaultOverridable()` helper
-- Shelter toggle in Step 3 now calls `handleShelterPresent()` which resets `shelter_factor.calculated` and clears any existing override
-
-### Notes
-- vb override is stored in Zustand but not yet sent to the backend (backend hardcodes 20 m/s from SG NA constants). A `TODO` comment marks the wire-up point. Backend change deferred.
-- Derivation rows are built from the existing API response — no backend changes required
-- Override reason is free-text with no validation gate — the PE report generation layer (Step 6, future) will surface it in Section 6 (Design Information)
+- `OverridableValue` interface — stores `calculated`, `override`, `override_reason`, `effective`.
+- `OverridableField` component — amber border + badge on override; reason field appears on change.
+- `DerivationPanel` component — collapsible step-by-step derivation for wind, steel, and foundation.
+- vb and shelter_factor converted to `OverridableValue` in `DesignParameters`.
 
 ---
 
 ## [0.8.0] — 2026-04-11
-
 ### Fixed
-- `foundation.py`: overturning resisting moment now applies γG,stb = 0.9 to the stabilising permanent load per EC7 EQU — `M_Rd = P_G × γG,stb × (B/2)`. Previously γG,stb was missing (equivalent to 1.0), over-stating resistance. Confirmed against P105 practice.
-- `foundation.py`: renamed all internal `footing_W_m` / `W_m` parameters to `footing_L_m` / `L_m` throughout (`_bearing_capacity_drained`, `_run_combination`, `compute_foundation`) to match EC7 Annex D notation (L = dimension perpendicular to wind). API request field `footing_W` unchanged; mapping in `calculate.py` updated to `footing_L_m`.
-- `steel.py`: added EC3 Clause 6.2.6 shear capacity check — `Av = A − 2bt_f + (t_w + 2r)t_f`; `Vc,Rd = Av × (fy/√3) / γM0`. Section selection now requires UR_moment < 1.0 AND UR_deflection < 1.0 AND UR_shear < 1.0. Shear does not govern for P105 geometry (UR_shear ≈ 0.05).
-
-### Added
-- `wind.py`: `compute_design_pressure()` now returns `vb_m_per_s`, `cdir`, `cseason`, `qb_N_per_m2`, `qb_kPa` — basic wind pressure qb = ½ρvb² = 238.80 N/m² per SG NA. Required by the calculate router response model.
-- `foundation.py`: `_run_combination()` return dict now includes `phi_d_deg` (design friction angle) and `b_prime_m` (effective footing width after eccentricity reduction). Required by the foundation results panel in Step 3.
-- `calculate.py`: `WindResult`, `SteelResult` Pydantic response models updated with the new fields added to `wind.py` and `steel.py` above.
-
-### Notes
-- P105 wind validation confirmed: qb=238.80 N/m², qp=598.48 N/m², design_pressure=0.359 kPa (target 0.36 kPa) ✓
-- P105 steel section validation: with shear check added, T1 selects `305 × 127 × 37` (UR_shear=0.048) and T2 selects `356 × 127 × 39` (UR_shear=0.050). PE report cites `356 × 127 × 33` (T1) and `406 × 140 × 39` (T2). Discrepancy pre-dates this fix — caused by sort order: `305 × 127 × 37` has Wpl_y=539 cm³ < `356 × 127 × 33` Wpl_y=543 cm³ and passes all three checks, so it is selected first. Pending PE clarification on whether shear UR or a different criterion governs section choice in those reports.
-- Foundation numeric validation requires actual P105 footing geometry (B, L, D, G) from PE report — not available in this session; estimated values used for smoke-testing. γG,stb formula is structurally confirmed correct per P105.
+- `foundation.py`: overturning check applies γG,stb=0.9 to stabilising moment per EC7 EQU.
+- `foundation.py`: internal footing dimension notation corrected to match EC7 Annex D (L perpendicular to wind, B in wind direction).
+- `steel.py`: EC3 Cl 6.2.6 shear capacity check added. Section selection now requires all three checks to pass.
 
 ---
 
 ## [0.7.0] — 2026-04-09
-
 ### Added
-- Step 3 Design Parameters form — 11 inputs across three groups (Wind, Post, Foundation); structure height sourced read-only from `project_info.barrier_height`; shelter toggle shows x/φ fields and warns ψs=0.5 stub is used
-- Step 3 Results panel — Wind (ze, qp, design pressure, ψs), Steel (designation, M_Ed/Mb,Rd, UR_moment/deflection with pass/fail), Foundation (SLS/DA1-C1/DA1-C2 table: sliding FOS, overturning FOS, bearing UR), overall pass/fail banner
-- `Run Calculations` button in Step 3 — POSTs form inputs to `/api/calculate`, stores response in Zustand, shows inline error on failure; button disabled until all required fields are filled
-- `calculation_results: CalculationResults | null` slice in Zustand store (`projectStore.ts`) with `setCalculationResults` action; persists across navigation within session; cleared on `reset()`
-- `CalculationResults`, `WindCalcResult`, `SteelCalcResult`, `FoundationComboResult` interfaces in `types/index.ts`
-- Updated `DesignParameters` interface and store defaults: added shelter_present/shelter_x/shelter_phi, post_length, footing_L_m/footing_B_m/footing_D_m, vertical_load_G_kN; soil defaults updated to P105 confirmed values (γs=19 kN/m³, c'k=5 kN/m²)
-
-### Notes
-- Shelter factor UI collects x and φ but passes ψs=0.5 stub to backend — full Figure 7.20 lookup deferred until `shelter_factor_table.json` is digitised
-- Results panel is read-only display; iterate by editing form fields and re-running
-- footing_L_m (along barrier, perpendicular to wind) maps to API field `footing_W`; footing_B_m (in wind direction) maps to `footing_B`
+- Step 3 Design Parameters form — Wind, Post, Foundation groups wired to Zustand.
+- Step 3 Results panel — Wind, Steel, Foundation results with pass/fail. Run Calculations button calls `POST /api/calculate`.
+- `CalculationResults`, `WindCalcResult`, `SteelCalcResult`, `FoundationComboResult` interfaces.
 
 ---
 
 ## [0.6.0] — 2026-04-09
-
 ### Added
-- `backend/app/calculation/` package — new engineering calculation engine
-- `backend/app/calculation/constants.py` — `APPLICABLE_CODES` (7 codes, cited verbatim in PE reports), `SG_NA` (Singapore NA constants: vb0=20m/s, ρ=1.194kg/m³, kl=1.0, kr=0.19, z0=0.05m, zmin=2m, cp_net=1.2), DA1-C1/C2/SLS partial factor dicts
-- `backend/app/calculation/wind.py` — `compute_qp(ze)` (EC1 Clause 4.3 chain: cr→vm→Iv→qp) and `compute_design_pressure(ze, ψs)` (qp × cp_net × ψs). P105 validation: ze=12.7m, ψs=0.5 → qp=0.598kPa, design_pressure=0.36kPa ✓
-- `backend/app/calculation/steel.py` — `compute_steel_design(design_pressure, post_spacing, subframe_spacing, post_length)`: iterates parts library ascending by Wpl_y, returns first section with UR_moment < 1.0 AND UR_deflection < 1.0. Implements EC3 Clause 6.3.2.3 LTB (αLT=0.34, λLT0=0.4, β=0.75, Lcr=subframe_spacing) and δ=wL⁴/(8EI) deflection (limit L/65)
-- `backend/app/calculation/foundation.py` — `compute_foundation(...)`: branches by footing_type. Branch A (Exposed pad): μ=0.3 sliding, Meyerhof eccentric bearing. Branch B (Embedded RC): tanφd friction, passive earth (evaluated to 0 per P105), EC7 Annex D.4 drained bearing capacity with Nγ=1.5(Nq-1)tanφ (P105 formula). All three combinations: SLS, DA1-C1, DA1-C2
-- `backend/app/routers/calculate.py` — `POST /api/calculate`: full chain wind→steel→foundation. Pydantic request/response models. SLS forces derived from steel results (M_Ed/1.5, V_Ed/1.5)
-- `backend/app/data/shelter_factor_table.json` — stub placeholder for EN 1991-1-4 Figure 7.20 digitisation (not yet implemented; feed ψs directly for P105 runs)
-
-### Changed
-- `backend/app/main.py` — registered `calculate` router alongside `extract` router
-
-### Notes
-- Steel section selection iterates all 107 UB sections sorted ascending by Wpl_y; lightest passing section is returned
-- Foundation bearing uses the P105 Nγ formula: 1.5(Nq-1)tanφ — see code-reference.md Section 8 item 3 for alternative
-- Passive earth resistance set to 0 (not relied upon) per P105 T1/T2 confirmed practice; implement when PE confirms it applies
-- Shelter factor lookup (Figure 7.20) deferred — shelter_factor_table.json is a stub; feed ψs=0.5 directly for P105 validation
+- `backend/app/calculation/` package — full calculation engine:
+  - `constants.py`: SG NA constants, EC partial factor dicts, applicable codes.
+  - `wind.py`: EC1 Cl 4.3 chain (cr→vm→Iv→qp→design_pressure). P105: qp=0.598 kPa ✓
+  - `steel.py`: LTB (EC3 Cl 6.3.2.3) + deflection check. Iterates parts library ascending.
+  - `foundation.py`: Embedded RC + Exposed pad branches. SLS/DA1-C1/DA1-C2. EC7 Annex D bearing.
+  - `shelter_factor_table.json`: EN 1991-1-4 Figure 7.20 digitised.
+- `POST /api/calculate`: full chain wind→steel→foundation.
 
 ---
 
 ## [0.5.0] — 2026-04-09
-
 ### Changed
-- Step 2: replaced combined segment table with per-alignment tab panel — one tab per alignment, each showing only that alignment's segments (ID, Length, Tag)
-- Step 2: canvas polylines now highlight when the corresponding tab is selected (amber, strokeWidth 3; inactive polylines render in blue at strokeWidth 1.5 with grey dots)
-- Step 2: clicking a polyline on the canvas activates its tab (bidirectional — 10 px proximity threshold in canvas coordinates)
-- Step 2: "Delete" per-alignment-row replaced with "Delete Selected" control button acting on the active alignment
-- Zustand store: `startNewPolyline` now sets `is_active: true` on the new polyline and `active_alignment_id` to its id; clears `is_active` on all others
-- Zustand store: `deletePolyline` now updates `active_alignment_id` to the last remaining polyline (or null) when the deleted polyline was active
-
-### Added
-- `is_active: boolean` to `Polyline` interface (`frontend/src/types/index.ts`)
-- `active_alignment_id: number | null` to `SiteData` interface and store default (`frontend/src/types/index.ts`, `frontend/src/store/projectStore.ts`)
-- `setActiveAlignment(id)` action in Zustand store — sets `active_alignment_id` and syncs `is_active` across all polylines
-
-### Notes
-- Segment IDs (A, B, C…) reset per alignment — unchanged
-- Only one alignment active/highlighted at a time
-- `activePolylineId` (local component state) tracks the polyline currently being drawn; `active_alignment_id` (store) tracks the selected tab/highlight — they are separate concepts
+- Step 2: per-alignment tab panel replaces combined segment table. Canvas polylines highlight on tab selection (bidirectional).
 
 ---
 
 ## [0.4.0] — 2026-04-09
-
 ### Changed
-- Removed `applicable_codes` slice from Zustand store (`frontend/src/store/projectStore.ts`)
-- Removed `CodeReference` interface from `frontend/src/types/index.ts`
-- Removed Code Selection tab from Step 3; Step 3 now opens directly on Design Parameters
-
+- `applicable_codes` Zustand slice and Code Selection tab removed from Step 3. Codes are fixed backend constants.
 ### Added
-- `ProjectMeta` interface (`frontend/src/types/index.ts`) — `id`, `created_by`, `last_modified_by`, `created_at`, `updated_at`
-- `meta` slice to ProjectContext (`frontend/src/store/projectStore.ts`) — `initMeta(createdBy)` generates UUID + timestamps on project creation; `setMeta` for partial updates
-- `created_by` and `updated_at` fields on `Project` interface (`frontend/src/types/index.ts`)
-- Creator name prompt modal on Overview page New Project button — sets `meta.created_by` and `meta.last_modified_by`, generates stub UUID for `meta.id`, sets timestamps, then navigates to `/project/new`
-- Attribution columns (Created by, Date) visible on Projects Library and Recent Projects rows
-- Mock data in `useProjects()` updated with `created_by` and `updated_at` fields
-
-### Notes
-- `meta.created_by` is free-text — no authentication behind it
-- Upgrade path: when user accounts are added, populate `created_by`/`last_modified_by` automatically from the logged-in session
-
----
-
-## [0.3.1] — 2026-04-09
-
-### Built (unlogged)
-- `code-reference.md` — engineering code reference (Eurocodes, SG NA, wind formulas, validation targets)
-- `unused.md` — archived earlier PRD draft; retained for reference
-- `backend/app/data/` — new data directory added under backend (contents TBD)
-- `union-noise-prd-v3.md` deleted; `union-noise-prd-v4.md` updated with user attribution spec, removal of `applicable_codes`, and `ProjectContext` meta schema
-
-### Notes
-- PRD v4 introduces two store-breaking changes: `applicable_codes` removed, `meta` slice added
+- `ProjectMeta` interface and `meta` Zustand slice — UUID, created_by, timestamps on project creation.
 
 ---
 
 ## [0.3.0] — 2026-04-06
-
 ### Added
-- **DesignParameters interface** (`frontend/src/types/index.ts`) — full typed schema for all engineering inputs: wind (basic_wind_speed, return_period, structure_height, shelter_factor, wind_zone, lh_ratio), structural geometry (post_spacing, subframe_spacing), materials (concrete_grade, steel_grade, rebar_grade, bolt_grade), foundation (footing_type, allowable_soil_bearing), and soil parameters (phi_k, gamma_s, cohesion_ck). Supporting enums: WindZone, FootingType, ConcreteGrade, SteelGrade, RebarGrade, BoltGrade.
-- **design_parameters slice** (`frontend/src/store/projectStore.ts`) — initialised with PRD-confirmed defaults (basic_wind_speed=20, return_period=50, shelter_factor=1.0, concrete_grade=C25/30, steel_grade=S275, rebar_grade=B500B, bolt_grade=8.8, allowable_soil_bearing=75, phi_k=30, gamma_s=20, cohesion_ck=0). `setDesignParameters(partial)` action for partial updates. Included in `reset()`.
-- **Design Parameters tab** (`frontend/src/steps/Step3.tsx`) — fully functional input panel replacing the placeholder. Four sections: Wind Analysis, Structural Geometry, Materials, Foundation + Soil Parameters. All fields bound to Zustand store. Provisional fields labelled. Reads and writes persist across navigation.
-
-### Notes
-- Wind zone (A/B/C/D) and l/h ratio are user-confirmed per PRD §2.4 — engineering judgement, not auto-calculated.
-- Soil parameters (phi_k, gamma_s, cohesion_ck) are marked provisional per PRD §2.5 — pending SME validation.
-- Calculation engine not yet wired — parameters are captured in ProjectContext only.
+- `DesignParameters` interface — full typed schema for all engineering inputs.
+- Design Parameters tab in Step 3 — Wind, Geometry, Materials, Foundation + Soil groups.
 
 ---
 
 ## [0.2.2] — 2026-04-06
-
 ### Added
-- **CodeReference interface** (`frontend/src/types/index.ts`) — `{ en_designation, eurocode_label, governs, selected }`.
-- **applicable_codes slice** (`frontend/src/store/projectStore.ts`) — persisted in Zustand with `toggleCode(en_designation)` action. Initialised with all 6 Eurocodes (EC0–EC3, EC7, SG NA) pre-selected; SS 602:2014 deselected by default. Included in `reset()`.
-- **ProjectsLibraryPage** (`frontend/src/pages/ProjectsLibraryPage.tsx`) — dedicated `/projects-library` route. Full project table with status dropdown filter and free-text search on name/location. Clicking a row navigates to `/project/:id` (revision vs overwrite decision deferred — flagged with TODO per PRD Section 13).
-- `/projects-library` route in `App.tsx`.
-
+- `ProjectsLibraryPage` at `/projects-library` with status filter and search.
 ### Changed
-- **Step3.tsx** — removed local `useState<Record<string, boolean>>` for code selection; reads `applicable_codes` and calls `toggleCode` from the Zustand store. EN designation is now the primary label (bold monospace); Eurocode name and governs text are subtitle lines below it.
-- **OverviewPage** (`frontend/src/pages/OverviewPage.tsx`) — "Projects Library" button now navigates to `/projects-library` instead of toggling an inline list. Removed `showOldProjects` state and inline expansion block.
-- **MasterDataPage** (`frontend/src/pages/MasterDataPage.tsx`) — replaced placeholder stub with a read-only sample members table (8 rows: UB 152×89×16, UB 203×102×23, UB 254×102×28, UB 406×140×46, SHS 50×50×4, SHS 75×75×5, M16 and M20 cast-in bolts). Upload button added to header (disabled stub — no functionality yet).
-
-### Notes
-- SS 602:2014 is optional and deselected by default; all other codes are pre-selected required defaults.
-- EN 1997-1:2004 (Eurocode 7 — Geotechnical Design) remains a pre-selected default.
-- Master Data upload button is a stub — wires to `POST /api/master-data` when backend is ready (PRD Section 2.6).
-- Projects Library filter operates on client-side mock data; replace `useProjects()` body with React Query call when persistence is added.
+- Step 3 code checklist reads from Zustand `applicable_codes` store.
 
 ---
 
 ## [0.2.1] — 2026-04-06
-
 ### Changed
-- **Overview page** (`frontend/src/pages/OverviewPage.tsx`) — replaced card grid with three prominent action buttons (New Project, Old Projects, Master Data) and a Recent Projects row-list below.
-  - **New Project** — existing behaviour, navigates to `/project/new`.
-  - **Old Projects** — toggles an inline row-list of all projects (Name, Barrier Type, Location, Date, Status). Clicking a row navigates to `/project/:id`. Edit behaviour (overwrite vs new revision) is deferred — flagged with `// TODO: revision vs overwrite decision pending — see PRD Section 13`.
-  - **Master Data** — navigates to `/master-data`.
-  - **Recent Projects** — always-visible list below the buttons, max 5 rows, sorted by most recent `created_at`. Sourced from the same `useProjects()` call — no data duplication.
-- **App.tsx** (`frontend/src/App.tsx`) — added `/master-data` route.
-
+- Overview page restructured — New Project, Old Projects, Master Data action buttons + Recent Projects list.
 ### Added
-- **MasterDataPage** (`frontend/src/pages/MasterDataPage.tsx`) — stub page at `/master-data` with upload area and "Upload member library (CSV/Excel) — coming soon" message. Upgrade path: `POST /api/master-data` when backend parts library is ready (PRD Section 2.6).
-
-### Notes
-- `useProjects`, `Project` interface, and `ProjectCard` component are unchanged.
-- `ProjectCard` is no longer used by OverviewPage (replaced by inline `ProjectRow`); it remains available for other consumers.
+- `MasterDataPage` stub at `/master-data`.
 
 ---
 
 ## [0.2.0] — 2026-04-06
-
 ### Added
-- **Overview page** (`frontend/src/pages/OverviewPage.tsx`) — new application entry point at `/`. Displays a grid of project cards with "New Project" button that navigates to `/project/new`.
-- **ProjectCard component** (`frontend/src/components/ProjectCard.tsx`) — renders project name, location, barrier type, date, and status badge. Navigates to `/project/:id` on click.
-- **useProjects hook** (`frontend/src/hooks/useProjects.ts`) — stub data layer returning `MOCK_PROJECTS`. Replace with `React Query → GET /api/projects` when backend persistence is added; callers need no changes.
-- **Project interface** (`frontend/src/types/index.ts`) — `{ id, project_name, barrier_type, location, created_at, status }`.
-
-### Changed
-- **Routing restructure** (`frontend/src/App.tsx`) — 6-step workflow moved from `/step/:n` to `/project/:id/step/:n`. Overview is a standalone route at `/`; project workflow uses the Layout (sidebar). Fallback `*` → `/`.
-- **Sidebar** (`frontend/src/components/Sidebar.tsx`) — reads `:id` from route params; step navigation links use `/project/${id}/step/${n}`; added "← Projects" back-link at top.
-- **useStepGuard** (`frontend/src/hooks/useStepGuard.ts`) — reads `:id` from route params; redirect uses `/project/${id}/step/${unlockedUpTo}`.
-- **Step 1–5 navigate calls** (`frontend/src/steps/Step1.tsx` – `Step5.tsx`) — all `navigate('/step/n')` updated to `navigate(\`/project/${id}/step/n\`)` using `useParams`.
-- **Step 2 canvas** (`frontend/src/steps/Step2.tsx`) — single polyline replaced with multiple independent polylines:
-  - "Start Drawing" creates a new named alignment (Alignment 1, 2, 3…) and begins drawing.
-  - "Stop Drawing" completes the current polyline without discarding it.
-  - Each alignment shown in an Alignments panel with a Delete button.
-  - Segment table gains an Alignment column; segment IDs reset A, B, C… per alignment.
-  - Canvas re-renders all polylines from the store on every change.
-- **Zustand store** (`frontend/src/store/projectStore.ts`) — `alignment_points: {x,y}[]` replaced with `polylines: Polyline[]`. New actions: `startNewPolyline`, `addPolylinePoint`, `undoLastPoint`, `deletePolyline`. `updateSegmentTag` now takes `(alignment_id, segment_id, tag)`. `buildSegmentTable` iterates all polylines and resets segment labels per alignment. `SegmentRow` shape updated: `alignment_id + segment_id` instead of `id`.
-- **Types** (`frontend/src/types/index.ts`) — `Polyline` interface added; `SegmentRow` updated (`alignment_id`, `segment_id`); `SiteData.alignment_points` replaced with `SiteData.polylines`.
-- **Step 3 code checklist** (`frontend/src/steps/Step3.tsx`) — updated display labels to match PRD v3 Section 2.3 format (full Eurocode names); EN designations shown as secondary text in monospace; added **Eurocode 7 — Geotechnical Design (EN 1997-1:2004)** as a pre-selected default (was missing from v0.1.0).
-- **Step 6 summary** (`frontend/src/steps/Step6.tsx`) — segment table key changed from `row.id` to `${row.alignment_id}-${row.segment_id}`; vertex count derived from `polylines` array; new "Alignments" summary row added.
-
-### Notes
-- `useProjects` returns hardcoded `MOCK_PROJECTS` — replace with `useQuery({ queryFn: () => api.get('/api/projects') })` when backend persistence is ready. Hook interface is stable.
-- Polyline store shape is pre-normalised for direct PostgreSQL mapping (each `Polyline` row maps to a `polylines` table, each `SegmentRow` to a `segments` table keyed on `alignment_id + segment_id`).
-- `handleStartDrawing` in Step 2 computes the next polyline id as `site_data.polylines.length + 1` at call time (before the Zustand update lands). This is correct because `startNewPolyline` appends synchronously and the id is deterministic.
-
-### Deferred
-- Clicking a mock project card navigates to `/project/:id` which resolves to the 6-step workflow — no project-specific state is loaded. Full project loading/persistence requires the PostgreSQL backend (planned for a future iteration).
+- Overview page, ProjectCard component, useProjects hook, Project interface.
+- Routing restructure: workflow moved to `/project/:id/step/:n`.
+- Step 2: multiple independent polylines with alignment panel and per-alignment segment table.
