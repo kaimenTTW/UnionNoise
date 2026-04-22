@@ -1,4 +1,5 @@
 import { create } from 'zustand'
+import { persist } from 'zustand/middleware'
 import type { BarrierType, CalibrationData, CalculationResults, DesignParameters, OverridableValue, Phase1Result, Polyline, ProjectInfo, ProjectMeta, SegmentRow, SiteData, SteelSection } from '../types'
 
 interface ProjectStore {
@@ -9,6 +10,7 @@ interface ProjectStore {
   calculation_results: CalculationResults | null
   phase1_result: Phase1Result | null
   step3_confirmed: boolean
+  step4_confirmed: boolean
   confirmed_section: SteelSection | null
   step4_notes: Record<string, string>
 
@@ -34,6 +36,7 @@ interface ProjectStore {
   confirmStep1: () => void
   confirmStep2: () => void
   confirmStep3: () => void
+  confirmStep4: () => void
   reset: () => void
 }
 
@@ -158,135 +161,150 @@ function getExistingTags(segment_table: SegmentRow[]): Map<string, SegmentRow['t
   return new Map(segment_table.map((r) => [`${r.alignment_id}-${r.segment_id}`, r.tag]))
 }
 
-export const useProjectStore = create<ProjectStore>((set, get) => ({
-  project_info: defaultProjectInfo,
-  site_data: defaultSiteData,
-  meta: defaultMeta,
-  design_parameters: defaultDesignParameters,
-  calculation_results: null,
-  phase1_result: null,
-  step3_confirmed: false,
-  confirmed_section: null,
-  step4_notes: {},
+export const useProjectStore = create<ProjectStore>()(
+  persist(
+    (set) => ({
+      project_info: defaultProjectInfo,
+      site_data: defaultSiteData,
+      meta: defaultMeta,
+      design_parameters: defaultDesignParameters,
+      calculation_results: null,
+      phase1_result: null,
+      step3_confirmed: false,
+      step4_confirmed: false,
+      confirmed_section: null,
+      step4_notes: {},
 
-  setProjectInfo: (partial) =>
-    set((s) => ({ project_info: { ...s.project_info, ...partial } })),
+      setProjectInfo: (partial) =>
+        set((s) => ({ project_info: { ...s.project_info, ...partial } })),
 
-  setSiteData: (partial) =>
-    set((s) => ({ site_data: { ...s.site_data, ...partial } })),
+      setSiteData: (partial) =>
+        set((s) => ({ site_data: { ...s.site_data, ...partial } })),
 
-  setCalibration: (partial) =>
-    set((s) => {
-      const calibration = { ...s.site_data.calibration, ...partial }
-      const existingTags = getExistingTags(s.site_data.segment_table)
-      const segment_table = buildSegmentTable(s.site_data.polylines, calibration.px_per_m, existingTags)
-      return { site_data: { ...s.site_data, calibration, segment_table } }
-    }),
+      setCalibration: (partial) =>
+        set((s) => {
+          const calibration = { ...s.site_data.calibration, ...partial }
+          const existingTags = getExistingTags(s.site_data.segment_table)
+          const segment_table = buildSegmentTable(s.site_data.polylines, calibration.px_per_m, existingTags)
+          return { site_data: { ...s.site_data, calibration, segment_table } }
+        }),
 
-  startNewPolyline: () =>
-    set((s) => {
-      const nextId = s.site_data.polylines.length + 1
-      const polylines = [
-        ...s.site_data.polylines.map((pl) => ({ ...pl, is_active: false })),
-        { id: nextId, points: [], is_active: true },
-      ]
-      return { site_data: { ...s.site_data, polylines, active_alignment_id: nextId } }
-    }),
+      startNewPolyline: () =>
+        set((s) => {
+          const nextId = s.site_data.polylines.length + 1
+          const polylines = [
+            ...s.site_data.polylines.map((pl) => ({ ...pl, is_active: false })),
+            { id: nextId, points: [], is_active: true },
+          ]
+          return { site_data: { ...s.site_data, polylines, active_alignment_id: nextId } }
+        }),
 
-  addPolylinePoint: (polylineId, pt) =>
-    set((s) => {
-      const polylines = s.site_data.polylines.map((pl) =>
-        pl.id === polylineId ? { ...pl, points: [...pl.points, pt] } : pl,
-      )
-      const existingTags = getExistingTags(s.site_data.segment_table)
-      const segment_table = buildSegmentTable(polylines, s.site_data.calibration.px_per_m, existingTags)
-      return { site_data: { ...s.site_data, polylines, segment_table } }
-    }),
+      addPolylinePoint: (polylineId, pt) =>
+        set((s) => {
+          const polylines = s.site_data.polylines.map((pl) =>
+            pl.id === polylineId ? { ...pl, points: [...pl.points, pt] } : pl,
+          )
+          const existingTags = getExistingTags(s.site_data.segment_table)
+          const segment_table = buildSegmentTable(polylines, s.site_data.calibration.px_per_m, existingTags)
+          return { site_data: { ...s.site_data, polylines, segment_table } }
+        }),
 
-  undoLastPoint: (polylineId) =>
-    set((s) => {
-      const polylines = s.site_data.polylines.map((pl) =>
-        pl.id === polylineId ? { ...pl, points: pl.points.slice(0, -1) } : pl,
-      )
-      const existingTags = getExistingTags(s.site_data.segment_table)
-      const segment_table = buildSegmentTable(polylines, s.site_data.calibration.px_per_m, existingTags)
-      return { site_data: { ...s.site_data, polylines, segment_table } }
-    }),
+      undoLastPoint: (polylineId) =>
+        set((s) => {
+          const polylines = s.site_data.polylines.map((pl) =>
+            pl.id === polylineId ? { ...pl, points: pl.points.slice(0, -1) } : pl,
+          )
+          const existingTags = getExistingTags(s.site_data.segment_table)
+          const segment_table = buildSegmentTable(polylines, s.site_data.calibration.px_per_m, existingTags)
+          return { site_data: { ...s.site_data, polylines, segment_table } }
+        }),
 
-  deletePolyline: (polylineId) =>
-    set((s) => {
-      const remaining = s.site_data.polylines.filter((pl) => pl.id !== polylineId)
-      const existingTags = getExistingTags(s.site_data.segment_table)
-      const segment_table = buildSegmentTable(remaining, s.site_data.calibration.px_per_m, existingTags)
-      const wasActive = s.site_data.active_alignment_id === polylineId
-      const newActiveId = wasActive
-        ? (remaining.length > 0 ? remaining[remaining.length - 1].id : null)
-        : s.site_data.active_alignment_id
-      const polylines = remaining.map((pl) => ({ ...pl, is_active: pl.id === newActiveId }))
-      return { site_data: { ...s.site_data, polylines, segment_table, active_alignment_id: newActiveId } }
-    }),
+      deletePolyline: (polylineId) =>
+        set((s) => {
+          const remaining = s.site_data.polylines.filter((pl) => pl.id !== polylineId)
+          const existingTags = getExistingTags(s.site_data.segment_table)
+          const segment_table = buildSegmentTable(remaining, s.site_data.calibration.px_per_m, existingTags)
+          const wasActive = s.site_data.active_alignment_id === polylineId
+          const newActiveId = wasActive
+            ? (remaining.length > 0 ? remaining[remaining.length - 1].id : null)
+            : s.site_data.active_alignment_id
+          const polylines = remaining.map((pl) => ({ ...pl, is_active: pl.id === newActiveId }))
+          return { site_data: { ...s.site_data, polylines, segment_table, active_alignment_id: newActiveId } }
+        }),
 
-  updateSegmentTag: (alignment_id, segment_id, tag) =>
-    set((s) => ({
-      site_data: {
-        ...s.site_data,
-        segment_table: s.site_data.segment_table.map((r) =>
-          r.alignment_id === alignment_id && r.segment_id === segment_id ? { ...r, tag } : r,
-        ),
+      updateSegmentTag: (alignment_id, segment_id, tag) =>
+        set((s) => ({
+          site_data: {
+            ...s.site_data,
+            segment_table: s.site_data.segment_table.map((r) =>
+              r.alignment_id === alignment_id && r.segment_id === segment_id ? { ...r, tag } : r,
+            ),
+          },
+        })),
+
+      setActiveAlignment: (id) =>
+        set((s) => ({
+          site_data: {
+            ...s.site_data,
+            active_alignment_id: id,
+            polylines: s.site_data.polylines.map((pl) => ({ ...pl, is_active: pl.id === id })),
+          },
+        })),
+
+      setMeta: (partial) => set((s) => ({ meta: { ...s.meta, ...partial } })),
+
+      initMeta: (createdBy) => {
+        const now = new Date().toISOString()
+        set({
+          meta: {
+            id: crypto.randomUUID(),
+            created_by: createdBy,
+            last_modified_by: createdBy,
+            created_at: now,
+            updated_at: now,
+          },
+        })
       },
-    })),
 
-  setActiveAlignment: (id) =>
-    set((s) => ({
-      site_data: {
-        ...s.site_data,
-        active_alignment_id: id,
-        polylines: s.site_data.polylines.map((pl) => ({ ...pl, is_active: pl.id === id })),
-      },
-    })),
+      setDesignParameters: (partial) =>
+        set((s) => ({ design_parameters: { ...s.design_parameters, ...partial } })),
 
-  setMeta: (partial) => set((s) => ({ meta: { ...s.meta, ...partial } })),
+      setCalculationResults: (results) => set({ calculation_results: results }),
 
-  initMeta: (createdBy) => {
-    const now = new Date().toISOString()
-    set({
-      meta: {
-        id: crypto.randomUUID(),
-        created_by: createdBy,
-        last_modified_by: createdBy,
-        created_at: now,
-        updated_at: now,
-      },
-    })
-  },
+      setPhase1Result: (result) => set({ phase1_result: result }),
 
-  setDesignParameters: (partial) =>
-    set((s) => ({ design_parameters: { ...s.design_parameters, ...partial } })),
+      setConfirmedSection: (section) => set({ confirmed_section: section }),
 
-  setCalculationResults: (results) => set({ calculation_results: results }),
+      setStep4Note: (moduleId, note) =>
+        set((s) => ({ step4_notes: { ...s.step4_notes, [moduleId]: note } })),
 
-  setPhase1Result: (result) => set({ phase1_result: result }),
+      confirmStep1: () =>
+        set((s) => ({ project_info: { ...s.project_info, step1_confirmed: true } })),
 
-  setConfirmedSection: (section) => set({ confirmed_section: section }),
+      confirmStep2: () =>
+        set((s) => ({ site_data: { ...s.site_data, step2_confirmed: true } })),
 
-  setStep4Note: (moduleId, note) =>
-    set((s) => ({ step4_notes: { ...s.step4_notes, [moduleId]: note } })),
+      confirmStep3: () => set({ step3_confirmed: true }),
 
-  confirmStep1: () =>
-    set((s) => ({
-      project_info: { ...s.project_info, step1_confirmed: true },
-    })),
+      confirmStep4: () => set({ step4_confirmed: true }),
 
-  confirmStep2: () =>
-    set((s) => ({
-      site_data: { ...s.site_data, step2_confirmed: true },
-    })),
-
-  confirmStep3: () => set({ step3_confirmed: true }),
-
-  reset: () =>
-    set({ project_info: defaultProjectInfo, site_data: defaultSiteData, meta: defaultMeta, design_parameters: defaultDesignParameters, calculation_results: null, phase1_result: null, step3_confirmed: false, confirmed_section: null, step4_notes: {} }),
-}))
+      reset: () =>
+        set({
+          project_info: defaultProjectInfo,
+          site_data: defaultSiteData,
+          meta: defaultMeta,
+          design_parameters: defaultDesignParameters,
+          calculation_results: null,
+          phase1_result: null,
+          step3_confirmed: false,
+          step4_confirmed: false,
+          confirmed_section: null,
+          step4_notes: {},
+        }),
+    }),
+    { name: 'union-noise-project' },
+  ),
+)
 
 // ─── Derived selectors ────────────────────────────────────────────────────────
 

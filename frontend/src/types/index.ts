@@ -456,7 +456,7 @@ export const STEPS: StepMeta[] = [
   { number: 1, title: 'Project Setup', subtitle: 'Extract design parameters from brief' },
   { number: 2, title: 'Site Interpretation', subtitle: 'Calibrate plan and digitise alignment' },
   { number: 3, title: 'Design Workspace', subtitle: 'Select codes and run calculations' },
-  { number: 4, title: 'Member Selection', subtitle: 'Choose structural members from library' },
-  { number: 5, title: 'Verification', subtitle: 'Review utilisation ratios and acceptance' },
+  { number: 4, title: 'Design Review', subtitle: 'Review utilisation ratios and accept the design' },
+  { number: 5, title: 'Verification', subtitle: 'Reserved — not in scope for this release' },
   { number: 6, title: 'Output Generation', subtitle: 'Generate drawings and design report' },
 ]

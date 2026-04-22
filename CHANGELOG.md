@@ -1,5 +1,16 @@
 # CHANGELOG
 
+## [0.16.1] — 2026-04-22
+### Fixed
+- `projectStore.ts`: wrapped store with `zustand/persist` (key `union-noise-project`, localStorage) — calculation results and all state now survive browser tab switches and page refreshes.
+- `Sidebar.tsx`: Step 4 now shows a tick when confirmed — added `step4_confirmed` to `stepStatus()` logic.
+- `types/index.ts`: Step 4 renamed "Design Review" (was "Member Selection"); Step 5 subtitle updated to "Reserved — not in scope for this release".
+### Added
+- `projectStore.ts`: `step4_confirmed` boolean + `confirmStep4()` action.
+- `Step4.tsx`: "Proceed to Outputs" button calls `confirmStep4()` before navigating to Step 6.
+
+---
+
 ## [0.16.0] — 2026-04-22
 ### Added
 - `Step4.tsx` — Design Review / Acceptance Gate. Full-width page with an overall pass/fail banner and one card per module (Steel Post, Foundation, Connection, Subframe, Lifting). Cards show per-check UR/FOS rows with green/red colouring and a green or red card border per overall pass. Inline note editor per card: "Add note" → textarea with Save/Cancel; saved notes display in amber with an "Edit" link. "Proceed to Outputs" button navigates to Step 6; disabled with tooltip when any module fails. Guard clause when `calculation_results` is null.

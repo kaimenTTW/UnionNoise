@@ -302,6 +302,7 @@ export default function Step4() {
 
   const calculation_results = useProjectStore((s) => s.calculation_results)
   const dp = useProjectStore((s) => s.design_parameters)
+  const confirmStep4 = useProjectStore((s) => s.confirmStep4)
 
   if (!calculation_results) {
     return (
@@ -372,7 +373,7 @@ export default function Step4() {
           {/* Proceed button */}
           <div className="flex justify-end pt-2">
             <button
-              onClick={() => navigate(`/project/${id}/step/6`)}
+              onClick={() => { confirmStep4(); navigate(`/project/${id}/step/6`) }}
               disabled={!allPass}
               title={allPass ? undefined : 'Resolve all failures before proceeding'}
               className={`btn-primary ${!allPass ? 'opacity-40 cursor-not-allowed' : ''}`}
