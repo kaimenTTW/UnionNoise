@@ -56,6 +56,23 @@ function lookupShelterFactor(xh: number, phi: number): number {
   return 1.0
 }
 
+// ─── cp,net lookup — EN 1991-1-4 Table 7.9 ───────────────────────────────────
+
+function cpNetZoneB(lh: number, hasReturnCorners: boolean): number {
+  if (hasReturnCorners) return 1.8
+  if (lh < 3)   return 1.4
+  if (lh <= 5)  return 1.4 + ((lh - 3) / 2) * 0.4
+  if (lh <= 10) return 1.8 + ((lh - 5) / 5) * 0.3
+  return 2.1
+}
+
+function cpNetZoneA(lh: number): number {
+  if (lh < 3)   return 2.3
+  if (lh <= 5)  return 2.3 + ((lh - 3) / 2) * 0.6
+  if (lh <= 10) return 2.9 + ((lh - 5) / 5) * 0.5
+  return 3.4
+}
+
 // ─── Layout helpers ───────────────────────────────────────────────────────────
 
 function FieldGroup({ title, children }: { title: string; children: React.ReactNode }) {
@@ -109,6 +126,7 @@ function OverridableField({
   span,
   value,
   onChange,
+  pending,
 }: {
   label: string
   hint?: string
@@ -116,12 +134,15 @@ function OverridableField({
   span?: boolean
   value: OverridableValue
   onChange: (v: OverridableValue) => void
+  /** When true the calculated value is not yet available — show a locked read-only display. */
+  pending?: boolean
 }) {
   const isOverridden = value.override !== null
   const displayValue = isOverridden ? value.override! : value.calculated
 
   // Local string tracks what's actually in the box, allowing partial editing.
   const [rawInput, setRawInput] = useState<string>(String(displayValue))
+  const [showOverride, setShowOverride] = useState(false)
 
   // When the calculated value changes externally (e.g. shelter factor recomputed)
   // and no override is active, keep the box in sync.
@@ -153,13 +174,59 @@ function OverridableField({
   function handleRevert() {
     onChange({ ...value, override: null, override_reason: '', effective: value.calculated })
     setRawInput(String(value.calculated))
+    setShowOverride(false)
+  }
+
+  // Pending: value not yet computed — show read-only placeholder, no edit
+  if (pending && !isOverridden) {
+    return (
+      <div className={`space-y-1${span ? ' col-span-2' : ''}`}>
+        <div className="flex items-baseline gap-2">
+          <label className="field-label mb-0">{label}</label>
+          {!showOverride && (
+            <button
+              type="button"
+              onClick={() => setShowOverride(true)}
+              className="text-[10px] text-muted hover:text-accent underline transition-colors"
+            >
+              Override
+            </button>
+          )}
+        </div>
+        {showOverride ? (
+          <>
+            <input
+              type="number"
+              step={step}
+              className="field-input border-warning/60 focus:border-warning"
+              value={rawInput}
+              onChange={handleChange}
+              onBlur={handleBlur}
+              autoFocus
+            />
+            <input
+              type="text"
+              placeholder="Override reason (required for PE report)"
+              className="field-input text-xs border-warning/40"
+              value={value.override_reason}
+              onChange={(e) => onChange({ ...value, override_reason: e.target.value })}
+            />
+          </>
+        ) : (
+          <div className="field-input bg-panel/50 opacity-50 cursor-not-allowed font-mono text-sm text-muted/60 select-none">
+            —
+          </div>
+        )}
+        {hint && <p className="text-xs text-muted/60">{hint}</p>}
+      </div>
+    )
   }
 
   return (
     <div className={`space-y-1${span ? ' col-span-2' : ''}`}>
       <div className="flex items-baseline gap-2">
         <label className="field-label mb-0">{label}</label>
-        {isOverridden && (
+        {isOverridden ? (
           <>
             <span className="text-[10px] font-semibold text-warning px-1.5 py-px rounded bg-warning/10 border border-warning/30 leading-none">
               Overridden
@@ -173,7 +240,7 @@ function OverridableField({
               ↺ reset to {value.calculated}
             </button>
           </>
-        )}
+        ) : null}
       </div>
       <input
         type="number"
@@ -330,6 +397,12 @@ function buildWindRows(
       result: `${wind.qp_N_per_m2.toFixed(1)} N/m²  (${wind.qp_kPa.toFixed(3)} kPa)`,
       clause: 'EC1 Eq 4.8',
     },
+    ...(wind.lh_ratio != null ? [{
+      label: 'l/h ratio',
+      expr: `barrier_length / ze`,
+      result: wind.lh_ratio.toFixed(1),
+      clause: 'EC1 Table 7.9',
+    }] : []),
     {
       label: 'Pressure coefficient',
       expr: `cp,net = ${wind.cp_net}`,
@@ -1217,14 +1290,6 @@ export default function Step3() {
   // Structure height: sourced from project_info.barrier_height (read-only display)
   const structureHeight = project_info.barrier_height ?? dp.structure_height
 
-  // Footing weight hint — estimates concrete-only weight from dimensions when all three are filled.
-  const footingWeightHint = useMemo(() => {
-    if (dp.footing_B_m && dp.footing_L_m && dp.footing_D_m) {
-      const est = dp.footing_B_m * dp.footing_L_m * dp.footing_D_m * 25
-      return `Footing concrete only: ~${est.toFixed(1)} kN (${dp.footing_B_m}×${dp.footing_L_m}×${dp.footing_D_m}m × 25 kN/m³). Add post self-weight.`
-    }
-    return 'Post + footing combined permanent vertical load'
-  }, [dp.footing_B_m, dp.footing_L_m, dp.footing_D_m])
 
   // Derive ψs from Figure 7.20 in real time.
   // Returns null when shelter_present=false or required inputs are incomplete.
@@ -1254,6 +1319,94 @@ export default function Step3() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [computedShelterFactor])
 
+  // Derive cp,net from EC1 Table 7.9 Zone B whenever solid mode inputs change.
+  const computedCpNet = useMemo<number>(() => {
+    if (dp.cp_net_mode !== 'solid') return 1.2
+    if (dp.barrier_length_m == null || structureHeight == null || structureHeight <= 0) return 1.2
+    const lh = dp.barrier_length_m / structureHeight
+    return cpNetZoneB(lh, dp.has_return_corners ?? false)
+  }, [dp.cp_net_mode, dp.barrier_length_m, structureHeight, dp.has_return_corners])
+
+  // Sync computedCpNet into dp.cp_net so the API always receives the resolved value.
+  useEffect(() => {
+    if (computedCpNet === dp.cp_net) return
+    set({ cp_net: computedCpNet })
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [computedCpNet])
+
+  // Derive post length from connection type, barrier height, and footing depth.
+  const computedPostLength = useMemo<number | null>(() => {
+    if (dp.connection_type == null) return null
+    if (structureHeight == null) return null
+    if (dp.connection_type === 'above_ground') return structureHeight
+    if (dp.connection_type === 'footing_block') {
+      if (dp.footing_D_m == null) return null
+      return structureHeight - dp.footing_D_m
+    }
+    if (dp.connection_type === 'fully_embedded') {
+      if (dp.footing_D_m == null) return null
+      return structureHeight + dp.footing_D_m
+    }
+    return null
+  }, [dp.connection_type, structureHeight, dp.footing_D_m])
+
+  useEffect(() => {
+    if (computedPostLength === null) return
+    if (computedPostLength === dp.post_length.calculated) return
+    setDesignParameters({
+      post_length: {
+        ...dp.post_length,
+        calculated: computedPostLength,
+        effective: dp.post_length.override ?? computedPostLength,
+      },
+    })
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [computedPostLength])
+
+  // Derive post self-weight from confirmed section mass and post length.
+  const computedPostWeight = useMemo<number | null>(() => {
+    if (confirmed_section == null) return null
+    if (dp.post_length.effective <= 0) return null
+    return parseFloat(
+      (confirmed_section.mass_kg_per_m * dp.post_length.effective * 9.81 / 1000).toFixed(2)
+    )
+  }, [confirmed_section, dp.post_length.effective])
+
+  useEffect(() => {
+    if (computedPostWeight === null) return
+    if (computedPostWeight === dp.post_weight.calculated) return
+    setDesignParameters({
+      post_weight: {
+        ...dp.post_weight,
+        calculated: computedPostWeight,
+        effective: dp.post_weight.override ?? computedPostWeight,
+      },
+    })
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [computedPostWeight])
+
+  // Derive permanent vertical load from footing concrete weight + post self-weight.
+  const computedPG = useMemo<number | null>(() => {
+    if (dp.footing_B_m == null || dp.footing_L_m == null || dp.footing_D_m == null) return null
+    const footing_weight = dp.footing_B_m * dp.footing_L_m * dp.footing_D_m * 25
+    const post_w = dp.post_weight.override ?? computedPostWeight
+    if (post_w == null) return null
+    return parseFloat((footing_weight + post_w).toFixed(2))
+  }, [dp.footing_B_m, dp.footing_L_m, dp.footing_D_m, dp.post_weight.override, computedPostWeight])
+
+  useEffect(() => {
+    if (computedPG === null) return
+    if (computedPG === dp.vertical_load_G.calculated) return
+    setDesignParameters({
+      vertical_load_G: {
+        ...dp.vertical_load_G,
+        calculated: computedPG,
+        effective: dp.vertical_load_G.override ?? computedPG,
+      },
+    })
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [computedPG])
+
   // When shelter_present toggles, reset the shelter_factor field.
   // On toggle-on: stub 0.5 until x/φ/h are all filled (useEffect above then takes over).
   // On toggle-off: 1.0 (no shelter).
@@ -1267,7 +1420,7 @@ export default function Step3() {
 
   // Auto-clear Phase 1 + Phase 2 results when wind/post params change.
   // Foundation param changes deliberately excluded — they don't affect Phase 1.
-  const clearTrigger = `${dp.post_spacing}|${dp.post_length}|${dp.subframe_spacing}|${structureHeight}|${dp.return_period}|${dp.vb.effective}|${dp.shelter_factor.effective}|${dp.cp_net}`
+  const clearTrigger = `${dp.post_spacing}|${dp.connection_type}|${dp.post_length.effective}|${dp.subframe_spacing}|${structureHeight}|${dp.return_period}|${dp.vb.effective}|${dp.shelter_factor.effective}|${dp.cp_net}|${dp.cp_net_mode}|${dp.barrier_length_m}|${dp.has_return_corners}`
   useEffect(() => {
     if (confirmed_section || phase1_result || calculation_results) {
       setConfirmedSection(null)
@@ -1285,16 +1438,19 @@ export default function Step3() {
     structureHeight != null &&
     dp.post_spacing != null &&
     dp.subframe_spacing != null &&
-    dp.post_length != null
+    dp.post_length.effective > 0 &&
+    dp.connection_type != null
 
-  // Phase 2 enabled when all fields are filled (foundation required)
+  // Phase 2 enabled when all fields are filled (foundation required).
+  // vertical_load_G is derived — we do not block on it since it computes
+  // only after a section is confirmed (chicken-and-egg with Phase 1 card).
+  // The backend derives G from footing dims + post weight anyway.
   const canRun =
     canPhase1 &&
     dp.footing_type != null &&
     dp.footing_B_m != null &&
     dp.footing_L_m != null &&
-    dp.footing_D_m != null &&
-    dp.vertical_load_G_kN != null
+    dp.footing_D_m != null
 
   // Shared wind+post body used by both phases
   function windPostBody() {
@@ -1303,10 +1459,12 @@ export default function Step3() {
       shelter_factor: dp.shelter_factor.override ?? (computedShelterFactor ?? dp.shelter_factor.calculated),
       vb: dp.vb.override !== null ? dp.vb.effective : undefined,
       return_period: dp.return_period,
-      cp_net: dp.cp_net ?? 1.2,
+      cp_net: computedCpNet,
+      barrier_length_m: dp.barrier_length_m ?? null,
+      has_return_corners: dp.has_return_corners ?? false,
       post_spacing: dp.post_spacing,
       subframe_spacing: dp.subframe_spacing,
-      post_length: dp.post_length,
+      post_length: dp.post_length.effective,
       deflection_limit_n: dp.deflection_limit_n,
       remarks: dp.remarks ?? '',
     }
@@ -1314,7 +1472,7 @@ export default function Step3() {
 
   // Map the flat section_result dict from the API into a SelectionResult
   function mapSectionResult(raw: Record<string, unknown>): SelectionResult {
-    const L_mm = (dp.post_length ?? 0) * 1000
+    const L_mm = dp.post_length.effective * 1000
     const Lcr_mm = (dp.subframe_spacing ?? 0) * 1000
     return {
       section: {
@@ -1390,6 +1548,18 @@ export default function Step3() {
     setPhase2Loading(true)
     setApiError(null)
     try {
+      // Compute post weight and PG directly from the incoming section rather
+      // than from store state — store updates from setConfirmedSection fire
+      // asynchronously and would send 0 if we read dp.post_weight.effective here.
+      const postLengthEff = dp.post_length.effective > 0 ? dp.post_length.effective : (computedPostLength ?? 0)
+      const derivedPostWeight = dp.post_weight.override !== null
+        ? dp.post_weight.override
+        : parseFloat((section.mass_kg_per_m * postLengthEff * 9.81 / 1000).toFixed(2))
+      const footingWeight = (dp.footing_B_m ?? 0) * (dp.footing_L_m ?? 0) * (dp.footing_D_m ?? 0) * 25
+      const derivedPG = dp.vertical_load_G.override !== null
+        ? dp.vertical_load_G.override
+        : parseFloat((footingWeight + derivedPostWeight).toFixed(2))
+
       const body = {
         ...windPostBody(),
         footing_type: dp.footing_type,
@@ -1401,10 +1571,11 @@ export default function Step3() {
         footing_B: dp.footing_B_m,
         footing_W: dp.footing_L_m,   // L (along barrier) → API footing_W
         footing_D: dp.footing_D_m,
-        vertical_load_G_kN: dp.vertical_load_G_kN,
-        post_weight_kN: dp.post_weight_kN ?? 6,
+        vertical_load_G_kN: derivedPG,
+        post_weight_kN: derivedPostWeight,
         cu_kPa: dp.cu_kPa ?? 0,
         pre_selected_section: section,
+        qp_kPa: windResult?.qp_kPa ?? null,
         // use_retrieval defaults to false on the backend — no web search in Phase 2
       }
       const res = await fetch('/api/calculate', {
@@ -1444,7 +1615,7 @@ export default function Step3() {
         w_kN_per_m: sr.w_kN_per_m,
         L_mm: sr.L_mm,
         Lcr_mm: sr.Lcr_mm,
-        post_length_m: dp.post_length,
+        post_length_m: dp.post_length.effective,
         deflection_limit_n: dp.deflection_limit_n,
         M_Ed_kNm: sr.M_Ed_kNm,
         V_Ed_kN: sr.V_Ed_kN,
@@ -1589,20 +1760,104 @@ export default function Step3() {
               onChange={(v) => set({ shelter_factor: v })}
             />
 
-            <Field label="Panel type (cp,net)" hint="Porous TNCB panels = 1.2 (standard). Solid panels — confirm value with PE.">
-              <select
-                className="field-input"
-                value={dp.cp_net ?? 1.2}
-                onChange={(e) => set({ cp_net: parseFloat(e.target.value) })}
-              >
-                <option value={1.2}>Porous (cp,net = 1.2)</option>
-                <option value={1.3}>Solid — confirm with PE (cp,net = 1.3)</option>
-              </select>
+            <Field
+              label="Panel type (cp,net)"
+              hint="Porous panels: cp,net = 1.2 (EC1 Table 7.9, φ = 0.8). Solid panels: Zone B varies by l/h ratio."
+              span
+            >
+              <div className="flex gap-3">
+                {(['porous', 'solid'] as const).map((mode) => (
+                  <button
+                    key={mode}
+                    type="button"
+                    onClick={() => set({ cp_net_mode: mode })}
+                    className={`px-4 py-1.5 rounded text-sm font-medium border transition-colors ${
+                      dp.cp_net_mode === mode
+                        ? 'border-accent bg-accent/20 text-accent'
+                        : 'border-border text-muted hover:border-muted'
+                    }`}
+                  >
+                    {mode === 'porous' ? 'Porous (φ = 0.8)' : 'Solid (φ = 1)'}
+                  </button>
+                ))}
+              </div>
             </Field>
+
+            {dp.cp_net_mode === 'solid' && (
+              <>
+                <Field label="Barrier total length (m)" hint="Full run length of the barrier — drives l/h for EC1 Table 7.9 Zone B.">
+                  <input
+                    type="number" min={1} step={1}
+                    className="field-input"
+                    placeholder="e.g. 146"
+                    value={numericValue(dp.barrier_length_m)}
+                    onChange={(e) => set({ barrier_length_m: parseNum(e.target.value) })}
+                  />
+                </Field>
+
+                <Field label="Return corners present?" hint="Perpendicular return ends of length ≥ h. Fixes Zone B at 1.8 for all l/h.">
+                  <div className="flex gap-3">
+                    {(['No', 'Yes'] as const).map((opt) => (
+                      <button
+                        key={opt}
+                        type="button"
+                        onClick={() => set({ has_return_corners: opt === 'Yes' })}
+                        className={`px-4 py-1.5 rounded text-sm font-medium border transition-colors ${
+                          (opt === 'Yes') === (dp.has_return_corners ?? false)
+                            ? 'border-accent bg-accent/20 text-accent'
+                            : 'border-border text-muted hover:border-muted'
+                        }`}
+                      >
+                        {opt}
+                      </button>
+                    ))}
+                  </div>
+                </Field>
+
+                {dp.barrier_length_m != null && structureHeight != null && structureHeight > 0 && (
+                  <Field
+                    label="cp,net (Zone B)"
+                    hint={(() => {
+                      const lh = dp.barrier_length_m / structureHeight
+                      const zoneA = cpNetZoneA(lh)
+                      return `l/h = ${lh.toFixed(1)} — Zone B = ${computedCpNet.toFixed(2)}. Zone A (end zone ≈10m from each end) = ${zoneA.toFixed(2)} — PE designs end zones separately.`
+                    })()}
+                    span
+                  >
+                    <input
+                      type="text"
+                      readOnly
+                      tabIndex={-1}
+                      className="field-input bg-panel/50 opacity-80 font-mono cursor-not-allowed"
+                      value={computedCpNet.toFixed(2)}
+                    />
+                  </Field>
+                )}
+              </>
+            )}
           </FieldGroup>
 
           {/* ── Post ── */}
           <FieldGroup title="Post">
+            <Field
+              label="Connection type"
+              hint="Determines post length relative to barrier height and footing depth."
+              span
+            >
+              <select
+                className="field-input"
+                value={dp.connection_type ?? ''}
+                onChange={(e) => set({
+                  connection_type: (e.target.value as DesignParameters['connection_type']) || null
+                })}
+              >
+                <option value="">— Select —</option>
+                <option value="above_ground">Above Ground — post_length = barrier_height</option>
+                <option value="footing_block">Footing Block — post_length = barrier_height − footing_D</option>
+                <option value="fully_embedded">Fully Embedded — post_length = barrier_height + footing_D</option>
+              </select>
+            </Field>
+
             <Field label="Post spacing (m)" hint="Tributary width per post">
               <input
                 type="number" min={0} step={0.5}
@@ -1623,15 +1878,25 @@ export default function Step3() {
               />
             </Field>
 
-            <Field label="Post length above foundation (m)" hint="T1 above-ground: ~11 m. T2 embedded: ~12.7 m">
-              <input
-                type="number" min={0} step={0.1}
-                className="field-input"
-                placeholder="e.g. 11.0"
-                value={numericValue(dp.post_length)}
-                onChange={(e) => set({ post_length: parseNum(e.target.value) })}
-              />
-            </Field>
+            <OverridableField
+              label="Post length (m)"
+              hint={
+                dp.connection_type == null
+                  ? 'Select connection type above to derive post length'
+                  : dp.connection_type === 'above_ground'
+                  ? `barrier_height = ${structureHeight ?? '—'} m`
+                  : dp.connection_type === 'footing_block'
+                  ? dp.footing_D_m == null
+                    ? 'Enter footing depth (D) in the Foundation group below to resolve'
+                    : `barrier_height − footing_D = ${structureHeight ?? '—'} − ${dp.footing_D_m} m`
+                  : dp.footing_D_m == null
+                  ? 'Enter footing depth (D) in the Foundation group below to resolve'
+                  : `barrier_height + footing_D = ${structureHeight ?? '—'} + ${dp.footing_D_m} m`
+              }
+              step={0.1}
+              value={dp.post_length}
+              onChange={(v) => set({ post_length: v })}
+            />
 
             <Field label="Deflection limit (L/n)" hint="Default n=65 — confirmed P105. Change only if PE specifies otherwise.">
               <input
@@ -1666,14 +1931,22 @@ export default function Step3() {
               />
             </Field>
 
-            <Field label="Post self-weight (kN)" hint="Steel post only — not including footing. Used for lifting hole shear check (footing not yet cast when post is lifted via web holes).">
-              <input
-                type="number" min={0.1} step={0.1}
-                className="field-input"
-                value={dp.post_weight_kN ?? 6}
-                onChange={(e) => set({ post_weight_kN: parseFloat(e.target.value) || 6 })}
-              />
-            </Field>
+            <OverridableField
+              label="Post self-weight (kN)"
+              hint={
+                confirmed_section == null
+                  ? 'Derived from confirmed section × post length — run Phase 1 first'
+                  : `${confirmed_section.mass_kg_per_m} kg/m × ${dp.post_length.effective} m × 9.81/1000`
+              }
+              step={0.1}
+              pending={computedPostWeight === null && dp.post_weight.override === null}
+              value={{
+                ...dp.post_weight,
+                calculated: computedPostWeight ?? dp.post_weight.calculated,
+                effective: dp.post_weight.override ?? (computedPostWeight ?? dp.post_weight.calculated),
+              }}
+              onChange={(v) => set({ post_weight: v })}
+            />
 
             {dp.footing_type === 'Exposed pad' && (
               <Field label="Allowable soil bearing (kPa)" hint="Default 75 kPa if no site investigation">
@@ -1716,15 +1989,22 @@ export default function Step3() {
               />
             </Field>
 
-            <Field label="Self-weight G (kN)" hint={footingWeightHint}>
-              <input
-                type="number" min={0} step={1}
-                className="field-input"
-                placeholder="e.g. 85"
-                value={numericValue(dp.vertical_load_G_kN)}
-                onChange={(e) => set({ vertical_load_G_kN: parseNum(e.target.value) })}
-              />
-            </Field>
+            <OverridableField
+              label="Self-weight G (kN)"
+              hint={
+                computedPG == null
+                  ? 'Derived from footing dimensions + post self-weight — fill all above'
+                  : `Footing ${dp.footing_B_m}×${dp.footing_L_m}×${dp.footing_D_m}m × 25 kN/m³ + post ${(dp.post_weight.override ?? computedPostWeight ?? 0).toFixed(2)} kN`
+              }
+              step={1}
+              pending={computedPG === null && dp.vertical_load_G.override === null}
+              value={{
+                ...dp.vertical_load_G,
+                calculated: computedPG ?? dp.vertical_load_G.calculated,
+                effective: dp.vertical_load_G.override ?? (computedPG ?? dp.vertical_load_G.calculated),
+              }}
+              onChange={(v) => set({ vertical_load_G: v })}
+            />
 
             <Field label="Soil φk (°)" hint="P105 confirmed: 30°" provisional>
               <input

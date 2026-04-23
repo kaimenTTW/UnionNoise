@@ -86,8 +86,14 @@ class CalculateRequest(BaseModel):
     # Wind — pressure coefficient
     cp_net: float = Field(
         1.2, gt=0,
-        description="Net pressure coefficient cp,net. Default 1.2 (porous TNCB panels, EC1 Table 7.9). "
-                    "Use 1.3 for solid panels — confirm with PE."
+        description="Net pressure coefficient cp,net. Default 1.2 (porous TNCB panels, EC1 Table 7.9)."
+    )
+
+    # Peak velocity pressure — passed from Phase 1 result so G clamp uses consistent qp.
+    # When None, falls back to computing qp from structure_height.
+    qp_kPa: float | None = Field(
+        None, gt=0,
+        description="Peak velocity pressure [kPa] from Phase 1. Used for G clamp external pressure."
     )
 
     # Pre-confirmed section (from Select → Optimize → Confirm flow in Step 3)
@@ -136,9 +142,33 @@ class WindResult(BaseModel):
 class SteelResult(BaseModel):
     designation: str | None = None
     mass_kg_per_m: float | None = None
+    fy_N_per_mm2: float | None = None
+    # Section dimensions
+    h_mm: float | None = None
+    b_mm: float | None = None
+    tf_mm: float | None = None
+    tw_mm: float | None = None
+    r_mm: float | None = None
+    # Section properties
+    Iy_cm4: float | None = None
+    Iz_cm4: float | None = None
+    Iw_dm6: float | None = None
+    It_cm4: float | None = None
+    Wpl_y_cm3: float | None = None
+    Wel_y_cm3: float | None = None
+    # Section classification
+    section_class: int | None = None
+    epsilon: float | None = None
+    flange_class: int | None = None
+    web_class: int | None = None
+    cf_tf_ratio: float | None = None
+    cw_tw_ratio: float | None = None
+    class3_wel_used: bool | None = None
+    # Loading
     w_kN_per_m: float | None = None
     M_Ed_kNm: float | None = None
     V_Ed_kN: float | None = None
+    # LTB
     Mpl_kNm: float | None = None
     Mcr_kNm: float | None = None
     lambda_bar_LT: float | None = None
@@ -146,17 +176,15 @@ class SteelResult(BaseModel):
     chi_LT: float | None = None
     Mb_Rd_kNm: float | None = None
     UR_moment: float | None = None
+    # Deflection
     delta_mm: float | None = None
     delta_allow_mm: float | None = None
     UR_deflection: float | None = None
+    # Shear
     Av_mm2: float | None = None
     Vc_kN: float | None = None
     UR_shear: float | None = None
-    h_mm: float | None = None
-    b_mm: float | None = None
-    tf_mm: float | None = None
-    tw_mm: float | None = None
-    r_mm: float | None = None
+    # Meta
     Lcr_mm: float | None = None
     post_length_m: float | None = None
     deflection_limit_n: float | None = None
@@ -173,6 +201,7 @@ class ConnectionResult(BaseModel):
     config_id: str
     bolt_tension: dict
     bolt_shear: dict
+    bolt_bearing: dict
     bolt_combined: dict
     bolt_embedment: dict
     weld: dict
@@ -318,14 +347,15 @@ async def calculate(body: CalculateRequest) -> CalculateResponse:
     connection_result: ConnectionResult | None = None
     if not steel_raw.get("error") and steel_raw.get("M_Ed_kNm") and steel_raw.get("V_Ed_kN"):
         try:
-            # External pressure for G clamp = qp × cp_net (pre-shelter, pre-cp,net reduction)
-            external_pressure_kPa = wind_raw["qp_kPa"] * wind_raw["cp_net"]
+            # qp from frontend Phase 1 result if provided; fall back to wind calc output
+            qp_for_clamp = body.qp_kPa if body.qp_kPa is not None else wind_raw["qp_kPa"]
             connection_raw = compute_connection(
                 M_Ed_kNm=steel_raw["M_Ed_kNm"],
                 V_Ed_kN=steel_raw["V_Ed_kN"],
                 section=steel_raw,
                 fck_N_per_mm2=body.fck,
-                external_pressure_kPa=external_pressure_kPa,
+                qp_kPa=qp_for_clamp,
+                shelter_factor=body.shelter_factor,
                 post_spacing_m=body.post_spacing,
                 barrier_height_m=body.structure_height,
             )

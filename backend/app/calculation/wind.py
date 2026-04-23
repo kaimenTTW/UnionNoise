@@ -76,6 +76,8 @@ def compute_design_pressure(
     vb: float | None = None,
     return_period: int = 50,
     cp_net: float = 1.2,
+    barrier_length_m: float | None = None,
+    has_return_corners: bool = False,
 ) -> dict:
     """
     Full wind chain: qp → design_pressure.
@@ -101,7 +103,9 @@ def compute_design_pressure(
 
     qp_result = compute_qp(structure_height, vb=vb_base, return_period=return_period)
     qp_kPa = qp_result["qp_kPa"]
+    ze = qp_result["ze_m"]
     design_pressure_kPa = qp_kPa * cp_net * shelter_factor
+    lh_ratio = round(barrier_length_m / ze, 2) if barrier_length_m else None
 
     # Recover Cprob from qp_result to include in response
     # (recomputed identically — avoids returning it from compute_qp which is a lower-level fn)
@@ -129,6 +133,7 @@ def compute_design_pressure(
         "cp_net": cp_net,
         "shelter_factor": shelter_factor,
         "design_pressure_kPa": round(design_pressure_kPa, 4),
+        "lh_ratio": lh_ratio,
     }
 
 

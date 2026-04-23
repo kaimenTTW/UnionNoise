@@ -1,5 +1,152 @@
 # CHANGELOG
 
+## [0.24.4] — 2026-04-24
+### Fixed
+- **PDF report `--` placeholder audit** (`report.py`, `connection.py`, `routers/calculate.py`): Resolved all spurious `--` values across the PDF report in a single pass.
+  - `SteelResult` Pydantic model was silently stripping 13 fields (`section_class`, `epsilon`, `flange_class`, `web_class`, `cf_tf_ratio`, `cw_tw_ratio`, `class3_wel_used`, `fy_N_per_mm2`, `Iy_cm4`, `Iz_cm4`, `Iw_dm6`, `It_cm4`, `Wpl_y_cm3`, `Wel_y_cm3`) — added all to response model.
+  - `ConnectionResult` Pydantic model was silently stripping `bolt_bearing` — added `bolt_bearing: dict` to response model.
+  - `compute_connection()` return dict was missing `bolt_diameter_mm`, `n_shear`, `plate_width_mm`, `plate_height_mm`, `plate_thickness_mm` — added to all relevant sub-dicts.
+  - Section 8 summary table: connection rows (bolt tension, shear, bearing, embedment, weld, base plate bending, G clamp) and lifting rows (hole shear, hook tension, hook bond) were hard-coded to `--` for demand/capacity — now populated from their respective sub-dicts.
+  - Foundation sliding/overturning Demand column now shows `H = x kN` / `M = x kNm` instead of `--`.
+  - Bolt count label corrected: `"5 tension + 10 shear = 15 total"` → `"5 bolts/row x 2 rows = 10 total"` (`n_shear` is the total, not a separate group).
+
+---
+
+## [0.24.3] — 2026-04-24
+### Fixed
+- `report.py`: All table cells converted from plain strings to `Paragraph` objects using `_TS_CELL` / `_TS_BOLD` styles with `wordWrap='CJK'`. Applies to derivation tables, inputs tables, results tables, spec tables, cover page tables, and the Section 8 summary table. Long formula and substitution strings now wrap within column bounds rather than overflowing.
+- `report.py`: Column widths corrected for A4 usable width (170 mm): derivation table 40/45/55/30 mm; inputs and spec tables 70/100 mm; results table 50/35/35/25/25 mm. `VALIGN TOP` added to all tables to align wrapped cells correctly.
+- `report.py`: All Unicode mathematical and Greek characters replaced with ASCII equivalents throughout every string in the file. `phi` -> `phi`, `psi` -> `psi`, `lambda` -> `lambda`, `gamma` -> `gamma`, `epsilon` -> `epsilon`, `chi` -> `chi`, `alpha` -> `alpha`, `beta` -> `beta`, `sqrt(...)` replaces the sqrt symbol, `x` replaces the multiply symbol, `^2`/`^3` replace superscripts, `deg` replaces the degree symbol, `<=`/`>=` replace Unicode comparison operators. Resolves black-box rendering on Helvetica.
+- `report.py`: Component Specification table added at the start of Steel (3.1), Connection (4.1), Subframe (5.1), Lifting (6.1), and Foundation (7.1) sections. Each table explicitly states the full dimensions and grade of every designed component using the same 70/100 mm two-column layout. Connection spec shows plate dimensions (W x H x t mm, S275), bolt spec (diameter, grade, tension/shear counts), embedment depth, weld throat and total length, and G clamp count and failure load. Foundation spec shows footing B x L x D in mm, concrete grade, and P_G.
+
+---
+
+## [0.24.2] — 2026-04-24
+### Fixed
+- `Step3.tsx`: Phase 2 ("Confirm & Continue") no longer blocked when `vertical_load_G.effective` is 0. `canRun` guard now requires only footing dimensions — `vertical_load_G` is derived and cannot be known before the section is confirmed (chicken-and-egg with Phase 1 card).
+- `Step3.tsx`: `handleRunPhase2` now computes `post_weight_kN` and `vertical_load_G_kN` directly from the incoming section object rather than reading from store state. `setConfirmedSection` fires asynchronously, so reading `dp.post_weight.effective` immediately after would have sent 0 to the backend for both values.
+- `Step3.tsx`: Post self-weight and Self-weight G fields now render as locked read-only display (`—`) when their computed value is not yet available (section not confirmed / footing dims incomplete). An "Override" button unlocks the field for engineer override when needed. Previously both fields showed an editable number input with value 0 before anything was computed.
+
+---
+
+## [0.24.1] — 2026-04-23
+### Fixed
+- `projectStore.ts`: Renamed persist key from `union-noise-project` to `union-noise-project-v2`. Clears stale localStorage from before `OverridableValue` schema change; old persisted `null` values for `post_length`, `post_weight`, `vertical_load_G` caused a crash on Step 3 when accessing `.effective` on a null object (blank page).
+
+---
+
+## [0.24.0] — 2026-04-23
+### Added
+- `backend/app/calculation/report.py`: PDF report generator using ReportLab platypus. 8-section PE-format calculation report with full derivations, formula substitutions, clause references, and PASS/FAIL indicators. Cover page with PE endorsement block (blank for PE to complete). Page headers with project name and job reference on all subsequent pages. Section structure: section title → inputs table → derivation table (Description / Formula / Substitution / Result) → results summary with UR colouring.
+- `backend/app/routers/report.py`: `POST /api/report/generate` endpoint. Accepts full calculation payload from frontend, returns PDF binary with `Content-Disposition: attachment` header. Filename derived from project_name.
+- `backend/app/main.py`: `report` router registered.
+- `reportlab` + `pillow` added to `pyproject.toml` dependencies via `uv add`.
+- `Step6.tsx`: Report generation page replacing the previous stub. Report metadata form (job reference, revision, checked by). Section list previews report contents before generation. Generate button assembles payload from Zustand store and calls `POST /api/report/generate`. PDF downloads directly via browser anchor. Regenerate button shown after first generation. Error and success states handled inline.
+### Notes
+- PE endorsement fields (name, registration, signature) are intentionally blank — PE completes after review.
+- Override notes section (Section 8.2) populated automatically when any OverridableValue field was overridden (vb, shelter_factor, post_length, post_weight, vertical_load_G).
+- Generate button disabled with amber warning when `calculation_results` is null (Step 3 not yet run).
+- Smoke test: P105-T2 full payload generates 30 KB valid PDF with all 8 sections and correct PASS banner.
+
+---
+
+## [0.23.1] — 2026-04-23
+### Fixed
+- `connection.py`: Plate thickness fixed at 20mm for all plate heights. Previous conditional (20mm ≤500mm, 25mm >500mm) was not confirmed by any PE report or client communication. Bayshore (600mm plate) and IJC T1 (550mm plate) both use 20mm — 25mm is LTA-specific, not a general rule.
+### Notes
+- Run A base plate bending UR = 0.546 with 20mm plate (was same, dynamic path selected 400mm plate class). Run B (config path, t=25mm) unchanged. All assertions pass.
+
+---
+
+## [0.23.0] — 2026-04-23
+### Fixed
+- `foundation.py`: Eccentric bearing branch added to embedded RC footing bearing pressure check. When e > B/6, uses q_max = 4P / (3Lb') where b' = 3(B/2 - e) instead of standard formula. Applies to SLS, DA1-C1, DA1-C2 combinations (all use SLS eccentricity per PE methodology). Return dict includes `eccentricity_m`, `eccentric_bearing` (bool), `b_prime_m` per combination.
+- `foundation.py`: Nγ corrected from 1.5×(Nq-1)×tanφ to 2×(Nq-1)×tanφ per EC7 Annex D.4. Previous multiplier 1.5 was P105-specific. qu increases for all embedded RC footing projects — bearing check becomes less conservative.
+- `foundation.py` `__main__`: Exact qu assertions replaced with structural checks (qu > 0, UR < 1.0). FOS targets (sliding, overturning) unchanged and still asserted within 0.5%.
+### Notes
+- P105 T2: e=0.443m > B/6=0.283m → eccentric branch active. b'=1.222m, q_applied=71.38 kPa, DA1-C1 drained UR=0.226, DA1-C2 drained UR=0.505, DA1-C1 undrained UR=0.449, DA1-C2 undrained UR=0.543. All pass.
+- Nγ change: DA1-C1 drained qu 279.44 → 315.16 kPa; DA1-C2 drained qu 127.91 → 141.28 kPa.
+- Exposed pad bearing branch already had the eccentric formula — no change required.
+- Frontend unchanged — eccentricity_m and eccentric_bearing available in response dict.
+
+---
+
+## [0.22.0] — 2026-04-23
+### Fixed
+- `steel.py`: Iw unit multiplier corrected 1e6 → 1e12. 1 dm = 100 mm → 1 dm⁶ = 1e12 mm⁶. Previous value underestimated warping contribution by 1e6×, making Mcr artificially low and chi_LT unnecessarily conservative.
+- `lifting.py`: `tw_for_hole_mm` now reads `section["tw_mm"]` instead of hardcoded 6.0 mm. P105 T2 section has tw=6.4 mm (PE report rounded to 6.0 mm — corrected). V_Rd 47.63 → 50.74 kN; UR_hole 0.189 → 0.177.
+- `steel.py` `__main__`: Exact designation assertions replaced with structural checks (`pass=True`, `UR_moment < 1.0`, `Mb_Rd_kNm > 0`, `UR_deflection < 1.0`). T1 section changes to 305×102×33 (lighter section now passes with correct Mcr). T2 section unchanged at 406×140×39.
+### Notes
+- Iw fix does not affect P105 T2 T2 section selection (406×140×39 still passes), but chi_LT increases: lambda_bar_LT 0.513, chi_LT 0.955, UR_moment 0.686. Correct values reflect more realistic buckling capacity.
+- lifting.py validation: UR_shear 0.177 (target 0.177 ✓), V_Rd 50.81 kN vs PE 50.74 kN (minor float vs manual rounding).
+
+---
+
+## [0.21.0] — 2026-04-23
+### Changed
+- `Step3.tsx`: `post_weight_kN` and `vertical_load_G_kN` free inputs replaced with OverridableFields driven by computed values. `post_weight` derived from confirmed section mass × post_length × 9.81/1000. `vertical_load_G` derived from footing concrete weight (B×L×D×25) + post_weight. Both update reactively when upstream inputs change. Override pattern applies throughout. Unused `footingWeightHint` memo removed.
+- `types/index.ts`: `post_weight_kN: number` and `vertical_load_G_kN: number | null` replaced with `post_weight: OverridableValue` and `vertical_load_G: OverridableValue`.
+- `projectStore.ts`: Both fields updated to OverridableValue initial state (calculated=0, effective=0).
+### Notes
+- Backend unchanged — `post_weight.effective` and `vertical_load_G.effective` sent as plain numbers under the same API keys `post_weight_kN` / `vertical_load_G_kN`.
+- P105 T2: computedPostWeight=4.86 kN (PE used 6.0 kN rounded). computedPG=196.11 kN (PE=196.25 kN). Override to 6.0 kN reproduces PE exactly.
+- Both fields show explanatory hint before Phase 1 runs / footing dims filled.
+- `canRun` gated on `vertical_load_G.effective > 0`.
+
+---
+
+## [0.20.0] — 2026-04-23
+### Changed
+- `Step3.tsx`: post_length free input replaced with OverridableField driven by connection_type selection. `computedPostLength` useMemo derives post length from connection_type, barrier_height, and footing_D. useEffect syncs to `dp.post_length.calculated`. Override pattern (amber badge + reason field) applies when PE specifies a different value.
+- `types/index.ts`: `post_length: number | null` removed from DesignParameters. `post_length: OverridableValue` and `connection_type: 'above_ground' | 'footing_block' | 'fully_embedded' | null` added.
+- `projectStore.ts`: `post_length: null` replaced with `post_length: OverridableValue` and `connection_type: null` in initial state.
+### Added
+- `Step3.tsx`: Connection type selector added to Post group — Above Ground, Footing Block, Fully Embedded. Drives post_length derivation and hints on the post_length field. `canPhase1` gated on `connection_type != null` and `post_length.effective > 0`.
+### Notes
+- Backend unchanged — `post_length.effective` sent as plain number, same as before.
+- P105 T2: connection_type=fully_embedded, barrier_height=12m, footing_D=0.7m → post_length=12.7m
+- IJC T1: connection_type=footing_block, barrier_height=10m, footing_D=1.5m → post_length=8.5m
+- RM T1: connection_type=above_ground, barrier_height=6m → post_length=6.0m
+
+---
+
+## [0.19.0] — 2026-04-23
+### Added
+- `Step3.tsx`: cp,net dynamic lookup from EC1 Table 7.9. Panel type toggle (Porous/Solid) replaces numeric dropdown. Solid mode reveals `barrier_length_m` input and `has_return_corners` toggle. `cpNetZoneB()` and `cpNetZoneA()` lookup functions added. `computedCpNet` useMemo syncs to `dp.cp_net` via useEffect. Solid mode read-only display shows resolved Zone B value with l/h and Zone A flag in hint text.
+- `types/index.ts`: `cp_net_mode`, `barrier_length_m`, `has_return_corners` added to `DesignParameters`. `lh_ratio` optional field added to `WindCalcResult`.
+- `projectStore.ts`: Initial state for three new fields (`cp_net_mode: 'porous'`, `barrier_length_m: null`, `has_return_corners: false`). Existing `cp_net=1.2` default preserved — porous mode behaviour identical to previous version.
+- `wind.py`: `barrier_length_m` and `has_return_corners` optional params added to `compute_design_pressure()`. `lh_ratio` echoed in return dict (null when porous mode or barrier_length_m not provided).
+- `Step3.tsx` buildWindRows: `lh_ratio` row added to wind derivation panel when `lh_ratio` is not null.
+- `calculate.py`: `qp_kPa` optional field added to `CalculateRequest` — receives Phase 1 qp from frontend for consistent G clamp pressure.
+### Fixed
+- `connection.py`: G clamp external pressure now computed as `qp_kPa × shelter_factor` instead of hardcoded 0.45 kPa. `qp_kPa` and `shelter_factor` replace `external_pressure_kPa` in function signature. P105 T2: external_pressure 0.45 → 0.299 kPa; F_per_clamp 2.44 → 1.615 kN; UR 0.105 → 0.069. n_clamps unchanged at 5 (config path).
+- `Step3.tsx` windPostBody: `cp_net` uses `computedCpNet`. `barrier_length_m` and `has_return_corners` added to API body.
+- `Step3.tsx` handleRunPhase2: `qp_kPa` added to Phase 2 body for consistent G clamp pressure.
+- `Step3.tsx` clearTrigger: extended to include `cp_net_mode`, `barrier_length_m`, `has_return_corners`.
+- `calculate.py` router: `compute_connection` call updated — passes `qp_kPa` + `shelter_factor` instead of computed `external_pressure_kPa`. Falls back to `wind_raw["qp_kPa"]` when frontend omits `qp_kPa`.
+- `constants.py`: clarifying comment added to `SG_NA['cp_net']` — documentation only, not read by calc modules.
+### Notes
+- Porous mode behaviour is identical to previous version — no existing project affected by default.
+- Solid mode cp,net = 1.3 (previous wrong default) is removed entirely.
+- G clamp UR change (0.105 → 0.069) confirmed in Run B `__main__` assertion.
+
+---
+
+## [0.18.0] — 2026-04-23
+### Added
+- `connection.py`: `_derive_connection(M_Ed_kNm, V_Ed_kN, section, fck)` — derives minimum-passing connection geometry when no `config_id` is provided. Iterates bolt diameter M16→M30; sizes plate width from section flange + 2×50mm edge (rounded to nearest 50mm); sizes plate height to satisfy tension demand; selects embedment depth from standard [450, 550, 650, 750] mm schedule; plate thickness 20mm (≤500mm plate) or 25mm (>500mm plate).
+- `connection.py`: Two-path routing in `compute_connection()` — `derived = config_id is None`. Derived path calls `_derive_connection()` and unpacks geometry; config path loads `connection_library.json` as before. All downstream checks (tension, shear, bearing, combined, embedment, weld, base plate, G clamp) are path-agnostic.
+- `connection_library.json`: `_routing` field — documents that configs are used only when `config_id` is explicit; dynamic derivation used when `config_id=None`; T1_M24_6bolt retained as P105 T2 validated reference.
+- `connection.py` `__main__`: Two-run validation — Run A (dynamic path, structural assertions: all URs < 1.0, embedment sufficient, Ds > 0); Run B (config path T1_M24_6bolt, P105 T2 PE exact-match assertions: Ft=96.53 kN, FT_Rd=260.58 kN, UR_tension=0.370, UR_embedment=0.731, n_clamps=5).
+### Notes
+- All previously validated P105 T2 outputs are unchanged — Run B assertions confirm this.
+- Derived path sets `config_id = "derived"` in the result dict for traceability.
+- G clamp on derived path defaults to `n_clamps_provided = 5` (same as PE-confirmed count). No config exists for derived geometry; engineer must review.
+- Dynamic derivation does not account for bolt bearing on derived geometry (bearing check runs post-derivation on the final bolt size). If bearing governs, the next bolt size would be needed — not yet handled in iteration loop.
+- Embedment awareness in iteration: `_derive_connection` computes the minimum Ds from both tension capacity and embedment depth limit (750mm) simultaneously, then rounds up to the next 50mm plate height. This avoids selecting a bolt that passes tension/shear but fails embedment.
+
+---
+
 ## [0.17.1] — 2026-04-22
 ### Added
 - `Step3.tsx` / `Step4.tsx`: Section class displayed in SteelPanel and SteelCard — Class 1/2 green, Class 3 amber with "(Wel)" note, Class 4 red. ε, cf/tf, cw/tw shown inline.

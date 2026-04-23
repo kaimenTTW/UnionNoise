@@ -1,6 +1,7 @@
 {
   "_note": "Standard base plate and anchor bolt configurations per post type. Source: Rowena / Union Noise drawings + P105 T2 calculation report (Han Engineering, 8/6/2023).",
   "_usage": "Connection checks use these as starting configurations. If any UR >= 1.0, upsize to next configuration in the list.",
+  "_routing": "Configs used only when config_id is explicitly passed. Dynamic derivation (_derive_connection) is used when config_id=None — iterates M16→M30 to find minimum-passing geometry. T1_M24_6bolt retained as P105 T2 validated reference.",
   "_ds_note": "T1_M24_6bolt: Ds=450mm explicit from PE calculation report page 10. Other configs: Ds derived as plate_height_mm/2 (unvalidated).",
 
   "configurations": [

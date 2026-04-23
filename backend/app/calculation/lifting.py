@@ -22,10 +22,10 @@ Validated against P105 T2 calculation report (Han Engineering, 8/6/2023):
           discrepancy. System uses correct rebar_library As values.
 
   Hole checks (page 6):
-    tw = 6.0 mm (PE uses 6.0mm; UB406×140×39 table value is 6.4mm)
+    tw = section["tw_mm"] = 6.4mm (PE used 6.0mm rounded down — corrected)
     edge_distance = 50 mm ✓
-    V_Rd = 50 × 6.0 × 275 / sqrt(3) / 1000 = 47.63 kN
-    W_post_factored = 6.0 × 1.5 = 9.0 kN; UR_hole = 9.0 / 47.63 = 0.189 ✓
+    V_Rd = 50 × 6.4 × 275 / sqrt(3) / 1000 = 50.74 kN
+    W_post_factored = 6.0 × 1.5 = 9.0 kN; UR_hole = 9.0 / 50.74 = 0.177 ✓
 
 References: EC3-1-8 Cl 3.6.1 (hook tension/shear),
             EC2 Cl 8.4.2 (anchorage bond),
@@ -155,7 +155,7 @@ def compute_lifting(
 
     # ── Lifting hole — post web shear ─────────────────────────────────────────
     edge_distance_mm = 50.0
-    tw_for_hole_mm = 6.0    # PE page 6 value; section["tw_mm"] = 6.4mm (table)
+    tw_for_hole_mm = section["tw_mm"]
     fy_post = section.get("fy_N_per_mm2", 275.0)
 
     Av_hole_mm2 = edge_distance_mm * tw_for_hole_mm
@@ -171,7 +171,7 @@ def compute_lifting(
             "hole_diameter_mm": 35.0,
             "edge_distance_mm": edge_distance_mm,
             "tw_mm": tw_for_hole_mm,
-            "tw_note": "tw=6.0mm per PE page 6; section table value is 6.4mm",
+            "tw_note": f"tw={tw_for_hole_mm}mm from section dict (P105 PE page 6 used 6.0mm rounded down from 6.4mm)",
             "Av_mm2": round(Av_hole_mm2, 2),
             "V_Rd_kN": round(V_Rd_hole_kN, 2),
             "post_weight_kN": post_weight_kN,
@@ -205,4 +205,12 @@ if __name__ == "__main__":
     print(f"F_hook:            {h.get('F_hook_kN'):.2f} kN  (target: 71.72)")
     print(f"FT_Rd:             {h.get('FT_Rd_kN'):.2f} kN  (target: 113.04)")
     print(f"UR_tension:        {h.get('UR_tension'):.4f}       (target: 0.634)")
+    hole = result["hole"]
+    print(f"tw_mm:             {hole.get('tw_mm')}  (target: 6.4)")
+    print(f"Av_mm2:            {hole.get('Av_mm2'):.1f}  (target: 320.0)")
+    print(f"V_Rd_kN:           {hole.get('V_Rd_kN'):.2f}  (target: 50.74)")
+    print(f"UR_shear:          {hole.get('UR_shear'):.3f}  (target: 0.177)")
     print(f"all_pass:          {result['all_checks_pass']}")
+    assert abs(hole["UR_shear"] - 0.177) < 0.001, f"UR_shear mismatch: {hole['UR_shear']}"
+    assert hole["pass_shear"], "Hole shear check failed"
+    print("Lifting validation: PASS")

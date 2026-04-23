@@ -76,8 +76,10 @@ export interface DesignParameters {
   post_spacing: number | null
   /** Subframe spacing (m). Drives Lcr for torsional buckling check. */
   subframe_spacing: number | null
-  /** Post length above foundation level (m). T1: 11m, T2: 12.7m. */
-  post_length: number | null
+  /** How the post connects to the foundation — determines post length derivation. */
+  connection_type: 'above_ground' | 'footing_block' | 'fully_embedded' | null
+  /** Post length above foundation level (m). Derived from connection_type; overridable. */
+  post_length: OverridableValue
   /** Deflection limit denominator n for δ_allow = L/n. Default 65 (P105 confirmed). */
   deflection_limit_n: number
 
@@ -102,10 +104,10 @@ export interface DesignParameters {
   footing_B_m: number | null
   /** Embedment depth below ground (m). 0 for exposed pad. */
   footing_D_m: number | null
-  /** Permanent vertical load: post self-weight + footing weight (kN). */
-  vertical_load_G_kN: number | null
-  /** Steel post self-weight only (kN). Used for lifting hole shear check (footing not yet cast). */
-  post_weight_kN: number              // default 6
+  /** Permanent vertical load: post self-weight + footing weight (kN). Derived; overridable. */
+  vertical_load_G: OverridableValue
+  /** Steel post self-weight (kN). Derived from section mass × post_length; overridable. */
+  post_weight: OverridableValue
 
   // ── Soil (provisional — user-configurable, not hardcoded) ──
   // PROVISIONAL: pending SME validation — see PRD Section 2.5
@@ -117,8 +119,14 @@ export interface DesignParameters {
   cohesion_ck: number               // default 5
   /** Undrained shear strength cu (kPa). 0 = drained checks only. P105 T2 uses 30 kPa. */
   cu_kPa: number                    // default 0
-  /** Net pressure coefficient cp,net. 1.2 = porous TNCB panels (default). 1.3 = solid panels. */
+  /** Net pressure coefficient cp,net. Resolved numeric value sent to API. */
   cp_net: number                    // default 1.2
+  /** Panel solidity mode — drives cp,net lookup from EC1 Table 7.9. */
+  cp_net_mode: 'porous' | 'solid'  // default 'porous'
+  /** Full run length of the barrier (m). Required for solid panel l/h derivation. */
+  barrier_length_m: number | null   // default null
+  /** Whether perpendicular return ends of length ≥ h are present. Fixes Zone B at 1.8. */
+  has_return_corners: boolean       // default false
   /** Optional additional considerations for section search and PE report. */
   remarks: string                   // default ""
 }
@@ -205,6 +213,7 @@ export interface WindCalcResult {
   cp_net: number
   shelter_factor: number
   design_pressure_kPa: number
+  lh_ratio?: number | null
 }
 
 export interface SteelCalcResult {

@@ -55,6 +55,8 @@ SG_NA: dict = {
     "zmin": 2.0,      # m — minimum reference height (NA Table NA.1)
     "co": 1.0,        # orography factor — flat terrain default (EC1 Clause 4.3.4)
     "cp_net": 1.2,    # net pressure coefficient — porous panel (EN 1991-1-4 Table 7.9)
+                      # Documentation only — not read by calculation modules.
+                      # cp_net is always passed explicitly as a function parameter.
     "cdir": 1.0,      # directional factor — confirmed unity across all reports
     "cseason": 1.0,   # season factor — confirmed unity across all reports
 }

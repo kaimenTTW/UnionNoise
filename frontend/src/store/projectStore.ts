@@ -70,7 +70,8 @@ const defaultDesignParameters: DesignParameters = {
   lh_ratio: null,
   post_spacing: 3.0,
   subframe_spacing: 1.5,
-  post_length: null,
+  connection_type: null,
+  post_length: { calculated: 0, override: null, override_reason: '', effective: 0 },
   deflection_limit_n: 65,
   concrete_grade: 'C25/30',
   rebar_grade: 'B500B',
@@ -81,13 +82,16 @@ const defaultDesignParameters: DesignParameters = {
   footing_L_m: null,
   footing_B_m: null,
   footing_D_m: 0,
-  vertical_load_G_kN: null,
-  post_weight_kN: 6,
+  vertical_load_G: { calculated: 0, override: null, override_reason: '', effective: 0 },
+  post_weight: { calculated: 0, override: null, override_reason: '', effective: 0 },
   phi_k: 30,
   gamma_s: 19,
   cohesion_ck: 5,
   cu_kPa: 0,
   cp_net: 1.2,
+  cp_net_mode: 'porous',
+  barrier_length_m: null,
+  has_return_corners: false,
   remarks: '',
 }
 
@@ -302,7 +306,7 @@ export const useProjectStore = create<ProjectStore>()(
           step4_notes: {},
         }),
     }),
-    { name: 'union-noise-project' },
+    { name: 'union-noise-project-v2' },
   ),
 )
 
