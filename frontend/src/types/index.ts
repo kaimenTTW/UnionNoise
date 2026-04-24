@@ -133,6 +133,29 @@ export interface DesignParameters {
   remarks: string                   // default ""
 }
 
+// ─── Section check result — engine recommendation snapshot for comparison ─────
+
+export interface SectionCheckResult {
+  designation: string
+  mass_kg_per_m: number
+  fy_N_per_mm2: number
+  UR_moment: number
+  UR_deflection: number
+  UR_shear: number
+  section_class: number | null    // null until Phase 2 completes for engine section
+  Mb_Rd_kNm: number | null        // null until Phase 2 completes
+  M_Ed_kNm: number
+  pass: boolean
+}
+
+// ─── Section override (engineer-selected section replacing optimiser result) ──
+
+export interface SectionOverride {
+  active: boolean
+  section: SteelSection | null   // null when not yet set
+  reason: string                 // required before override can be applied
+}
+
 // ─── Steel section (from parts library or web search) ────────────────────────
 
 export interface SteelSection {

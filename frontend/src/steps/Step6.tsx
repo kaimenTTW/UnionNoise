@@ -43,6 +43,7 @@ export default function Step6() {
     meta,
     design_parameters: dp,
     calculation_results,
+    section_override,
   } = useProjectStore()
 
   const [jobReference, setJobReference] = useState('')
@@ -87,6 +88,7 @@ export default function Step6() {
         vertical_load_G:     dp.vertical_load_G,
         design_pressure_kPa: calculation_results?.wind?.design_pressure_kPa ?? null,
       },
+      section_override: section_override.active ? section_override : null,
       calculation_results,
     }
 

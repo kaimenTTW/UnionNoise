@@ -1,5 +1,48 @@
 # CHANGELOG
 
+## [0.30.4] — 2026-04-25
+### Fixed
+- `Step3.tsx`: Phase 1 supplier list now persists after "Confirm & Continue" and after "Clear Override". Previously `SectionCard` unmounted the moment `confirmed_section` was set, taking the supplier panel with it. Supplier results from Phase 1 are now re-rendered directly in the confirmed section area so the contact list stays visible throughout the session.
+
+---
+
+## [0.30.3] — 2026-04-25
+### Fixed
+- `Step3.tsx`: Run Calculations button no longer reappears after Apply Override. Previously `confirmed_section != null` caused the button to show even though Phase 2 had just fired automatically, confusing the engineer about what to do next.
+- `Step3.tsx`: Confirmed section banner is amber (not green) when override is active, with "⚠ Override active:" label and "Clear override" action alongside "Change section". Previously the green banner gave no indication that an override was in effect.
+- `Step3.tsx`: Supplier search for override section is now on-demand only — "Find suppliers for UB {designation}" link appears below the amber banner. Clicking fires `POST /api/suppliers` and shows results when ready. Previously the search fired automatically on every override, wasting API calls when the engineer was just checking calculations. Clearing the override discards the result; the Phase 1 supplier list (engine section) remains in `SectionCard` and is unaffected.
+
+---
+
+## [0.30.2] — 2026-04-25
+### Fixed
+- `Step3.tsx`: Apply Override now automatically triggers Phase 2 recalculation with the overridden section. Previously engineer had to manually re-run Phase 2 after overriding.
+- `Step3.tsx`: Apply Override now triggers `POST /api/suppliers` for the overridden section designation simultaneously with Phase 2. Previously the supplier panel showed results for the engine recommendation even after override. Both run simultaneously — Phase 2 fast, supplier search background.
+- `Step3.tsx`: Clear Override now re-triggers Phase 2 with the engine section and fires a fresh supplier search for the original designation.
+### Added
+- `Step3.tsx`: Section comparison table shown when override is active and Phase 2 has completed. Side-by-side comparison of engine recommendation vs override — designation, mass, grade, UR moment, UR deflection, UR shear, section class. UR colour coding: red (≥1.0), amber (≥0.95), clean (<0.95). Override reason shown below table.
+- `Step3.tsx`: Phase 2 loading label distinguishes override recalculation — "Recalculating for overridden section UB {designation}…"
+- `projectStore.ts`: `engine_section_result` field (`SectionCheckResult | null`) — stores Phase 1 engine recommendation permanently for comparison. Never overwritten by override. Cleared only when Phase 1 clearTrigger fires (wind/post parameter change).
+- `projectStore.ts`: `setEngineSectionResult` action.
+- `types/index.ts`: `SectionCheckResult` interface — designation, mass_kg_per_m, fy_N_per_mm2, UR_moment, UR_deflection, UR_shear, section_class, Mb_Rd_kNm, M_Ed_kNm, pass.
+### Notes
+- Phase 2 and supplier search fire simultaneously on override — engineer does not wait for supplier search before seeing new URs.
+- `engine_section_result` preserved through override so comparison table always shows original recommendation alongside override.
+- Supplier search on Clear Override runs independently — never blocks Phase 2 restoration.
+
+---
+
+## [0.30.0] — 2026-04-24
+### Added
+- `types/index.ts`: `SectionOverride` interface — `{ active, section: SteelSection | null, reason }`. Tracks whether an engineer has manually overridden the optimiser-selected section and the stated reason.
+- `projectStore.ts`: `available_sections: SteelSection[]` store field — populated from `all_sections` returned by Phase 1 `/api/wind-and-select`. `section_override: SectionOverride` store field with `setSectionOverride`, `clearSectionOverride` actions. Both are reset on `reset()` and cleared when wind/post parameters change (Phase 1 auto-clear trigger).
+- `Step3.tsx`: Collapsible "Override section" panel below Optimize/Confirm buttons. Dropdown grouped by S275/S355 (from `available_sections`). Reason field (required). "Apply Override" button (amber, disabled until both fields filled). Active override shown as amber badge with "Clear" link. Confirm & Continue uses override section when active.
+- `routers/suppliers.py`: `POST /api/suppliers` endpoint — accepts `designation`, `grade`, `mass_kg_per_m`; calls `find_suppliers()` and returns SupplierResult dict. Registered in `main.py`.
+- `Step6.tsx`: `section_override` included in report generation payload (sent as `null` when not active).
+- `report.py`: Override note rendered in section 3.1 when `section_override.active` is true — amber-tinted paragraph identifying the overridden section and engineer-stated reason.
+
+---
+
 ## [0.29.2] — 2026-04-24
 ### Fixed
 - `report.py`: `draw_base_plate_sketch()` annotation and dimension formatting. Annotation block expanded to 36mm height with 10pt line spacing — eliminates text overlap. Left column: plate/bolt/edge spec on three lines. Right column: Ds, bolt rows/cols, section designation — 60mm gap between columns. Dimension lines reorganised: Ds on left (20mm offset), plate height on right (20mm offset), plate width below (15mm offset). Right-side edge distance label removed — stated in annotation block instead. Bolt pitch label moved inside plate between bolt column centres. Title repositioned 8mm above plate top at 9pt Helvetica-Bold. All dimension labels 7pt; bolt pitch label inside plate 6pt grey. Truncation note in 7pt red italic when applicable.

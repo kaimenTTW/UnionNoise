@@ -11,7 +11,10 @@ import type {
   OptimiseResult,
   OverridableValue,
   Phase1Result,
+  SectionCheckResult,
+  SectionOverride,
   SelectionResult,
+  SteelCalcResult,
   SteelSection,
   SubframeCalcResult,
   SupplierResult,
@@ -1079,6 +1082,93 @@ function LiftingPanel({ lift }: { lift: LiftingCalcResult }) {
 
 // ─── Section selection cards ──────────────────────────────────────────────────
 
+function urCellClass(ur: number | null | undefined): string {
+  if (ur == null) return ''
+  if (ur >= 1.0) return 'bg-red-500/20 text-red-400'
+  if (ur >= 0.95) return 'bg-amber-500/15 text-amber-300'
+  return 'text-green-400'
+}
+
+function SectionComparisonTable({
+  engineResult,
+  overrideSection,
+  overrideSteel,
+  overrideReason,
+}: {
+  engineResult: SectionCheckResult
+  overrideSection: SteelSection
+  overrideSteel: SteelCalcResult
+  overrideReason: string
+}) {
+  const engGrade = engineResult.fy_N_per_mm2 >= 355 ? 'S355' : 'S275'
+  const ovGrade  = overrideSection.fy_N_per_mm2 >= 355 ? 'S355' : 'S275'
+
+  const rows: { label: string; eng: React.ReactNode; ov: React.ReactNode }[] = [
+    {
+      label: 'Section',
+      eng: <span className="font-mono">UB {engineResult.designation}</span>,
+      ov:  <span className="font-mono">UB {overrideSection.designation}</span>,
+    },
+    {
+      label: 'Mass (kg/m)',
+      eng: engineResult.mass_kg_per_m.toFixed(1),
+      ov:  overrideSection.mass_kg_per_m.toFixed(1),
+    },
+    { label: 'Grade', eng: engGrade, ov: ovGrade },
+    {
+      label: 'UR moment',
+      eng: <span className={urCellClass(engineResult.UR_moment)}>{engineResult.UR_moment.toFixed(3)}</span>,
+      ov:  <span className={urCellClass(overrideSteel.UR_moment)}>{(overrideSteel.UR_moment ?? 0).toFixed(3)}</span>,
+    },
+    {
+      label: 'UR deflection',
+      eng: <span className={urCellClass(engineResult.UR_deflection)}>{engineResult.UR_deflection.toFixed(3)}</span>,
+      ov:  <span className={urCellClass(overrideSteel.UR_deflection)}>{(overrideSteel.UR_deflection ?? 0).toFixed(3)}</span>,
+    },
+    {
+      label: 'UR shear',
+      eng: <span className={urCellClass(engineResult.UR_shear)}>{engineResult.UR_shear.toFixed(3)}</span>,
+      ov:  <span className={urCellClass(overrideSteel.UR_shear)}>{(overrideSteel.UR_shear ?? 0).toFixed(3)}</span>,
+    },
+    {
+      label: 'Section class',
+      eng: engineResult.section_class != null ? `Class ${engineResult.section_class}` : '—',
+      ov:  overrideSteel.section_class != null ? `Class ${overrideSteel.section_class}` : '—',
+    },
+  ]
+
+  return (
+    <div className="rounded border border-amber-500/30 bg-amber-500/5 p-3 space-y-2">
+      <p className="text-xs font-semibold uppercase tracking-widest text-amber-400/80">
+        Section comparison
+      </p>
+      <div className="overflow-x-auto">
+        <table className="w-full text-xs border-collapse">
+          <thead>
+            <tr className="bg-surface/60">
+              <th className="text-left px-2 py-1.5 text-muted font-semibold w-32"></th>
+              <th className="text-center px-2 py-1.5 text-muted font-semibold">Engine recommendation</th>
+              <th className="text-center px-2 py-1.5 text-amber-400/80 font-semibold bg-amber-500/10">Override</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((r) => (
+              <tr key={r.label} className="border-t border-border/30">
+                <td className="px-2 py-1.5 text-muted">{r.label}</td>
+                <td className="px-2 py-1.5 text-center text-white">{r.eng}</td>
+                <td className="px-2 py-1.5 text-center bg-amber-500/5">{r.ov}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      {overrideReason && (
+        <p className="text-[11px] text-muted/60 italic">Override reason: {overrideReason}</p>
+      )}
+    </div>
+  )
+}
+
 function SupplierPanel({
   suppliers,
   designation,
@@ -1162,6 +1252,12 @@ function SectionCard({
   isPhase2Loading,
   isPhase1Loading,
   canRun,
+  availableSections,
+  sectionOverride,
+  onApplyOverride,
+  onClearOverride,
+  overrideSuppliers,
+  overrideSuppliersLoading,
 }: {
   result: SelectionResult
   onOptimise: () => void
@@ -1170,6 +1266,12 @@ function SectionCard({
   isPhase2Loading: boolean
   isPhase1Loading: boolean
   canRun: boolean
+  availableSections: SteelSection[]
+  sectionOverride: SectionOverride
+  onApplyOverride: (override: SectionOverride) => void
+  onClearOverride: () => void
+  overrideSuppliers: SupplierResult | null
+  overrideSuppliersLoading: boolean
 }) {
   const { section, checks, source, fallback_reason, suppliers } = result
   const allPass = checks.pass
@@ -1177,6 +1279,18 @@ function SectionCard({
   const sourceLabel =
     source === 'live' ? 'Continental Steel (live)' : source === 'cache' ? 'Library (cached)' : 'Pre-selected'
   const confirmDisabled = !canRun || isPhase2Loading
+
+  const [overrideOpen, setOverrideOpen] = useState(false)
+  const [draftDesignation, setDraftDesignation] = useState<string>(
+    sectionOverride.section?.designation ?? '',
+  )
+  const [draftReason, setDraftReason] = useState(sectionOverride.reason)
+
+  const s275Sections = availableSections.filter((s) => s.fy_N_per_mm2 < 355)
+  const s355Sections = availableSections.filter((s) => s.fy_N_per_mm2 >= 355)
+
+  const canApply = draftDesignation.trim() !== '' && draftReason.trim() !== ''
+  const selectedSection = availableSections.find((s) => s.designation === draftDesignation) ?? null
 
   return (
     <div className="rounded border border-border bg-surface/40 p-4 space-y-3">
@@ -1192,11 +1306,16 @@ function SectionCard({
         <p className="text-xs text-warning/80">{fallback_reason}</p>
       )}
       <SupplierPanel
-        suppliers={suppliers}
-        designation={section.designation}
-        grade={gradeLabel}
-        isLoading={isPhase1Loading}
+        suppliers={sectionOverride.active ? (overrideSuppliers ?? undefined) : suppliers}
+        designation={sectionOverride.active ? (sectionOverride.section?.designation ?? section.designation) : section.designation}
+        grade={sectionOverride.active ? (sectionOverride.section?.fy_N_per_mm2 ?? 275) >= 355 ? 'S355' : 'S275' : gradeLabel}
+        isLoading={sectionOverride.active ? overrideSuppliersLoading : isPhase1Loading}
       />
+      {sectionOverride.active && isPhase2Loading && (
+        <p className="text-xs text-amber-400/80 font-medium">
+          Recalculating for overridden section UB {sectionOverride.section?.designation}…
+        </p>
+      )}
       <div className="grid grid-cols-3 gap-2 text-xs">
         <div>
           <p className="text-muted mb-0.5">UR moment</p>
@@ -1243,6 +1362,102 @@ function SectionCard({
         >
           {isPhase2Loading ? 'Calculating…' : 'Confirm & Continue →'}
         </button>
+      </div>
+
+      {/* Override panel */}
+      <div className="border-t border-border/40 pt-3 mt-1">
+        {sectionOverride.active && (
+          <div className="mb-2 rounded border border-amber-500/50 bg-amber-500/10 px-3 py-2 flex items-center justify-between">
+            <span className="text-xs text-amber-400 font-medium">
+              Override active: UB {sectionOverride.section?.designation}
+            </span>
+            <button
+              type="button"
+              onClick={() => {
+                onClearOverride()
+                setDraftDesignation('')
+                setDraftReason('')
+                setOverrideOpen(false)
+              }}
+              className="text-xs text-amber-400/70 hover:text-amber-300 underline ml-3"
+            >
+              Clear
+            </button>
+          </div>
+        )}
+        <button
+          type="button"
+          onClick={() => setOverrideOpen((o) => !o)}
+          className="flex items-center gap-1.5 text-xs text-muted hover:text-white transition-colors"
+        >
+          <span className="font-mono">{overrideOpen ? '▾' : '▸'}</span>
+          Override section
+        </button>
+        {overrideOpen && (
+          <div className="mt-2 space-y-2 rounded border border-amber-500/30 bg-amber-500/5 p-3">
+            <p className="text-[11px] text-muted/70">
+              Select a section from the full library. Provide a reason — it will appear in the PE report.
+            </p>
+            <div>
+              <label className="block text-[11px] text-muted mb-1">Section</label>
+              <select
+                value={draftDesignation}
+                onChange={(e) => setDraftDesignation(e.target.value)}
+                className="w-full bg-surface border border-border rounded px-2 py-1 text-xs text-white focus:outline-none focus:border-accent"
+              >
+                <option value="">— select —</option>
+                {s275Sections.length > 0 && (
+                  <optgroup label="S275">
+                    {s275Sections.map((s) => (
+                      <option key={s.designation} value={s.designation}>
+                        UB {s.designation} · {s.mass_kg_per_m} kg/m
+                      </option>
+                    ))}
+                  </optgroup>
+                )}
+                {s355Sections.length > 0 && (
+                  <optgroup label="S355">
+                    {s355Sections.map((s) => (
+                      <option key={s.designation} value={s.designation}>
+                        UB {s.designation} · {s.mass_kg_per_m} kg/m
+                      </option>
+                    ))}
+                  </optgroup>
+                )}
+              </select>
+            </div>
+            <div>
+              <label className="block text-[11px] text-muted mb-1">Reason <span className="text-red-400">*</span></label>
+              <input
+                type="text"
+                value={draftReason}
+                onChange={(e) => setDraftReason(e.target.value)}
+                placeholder="e.g. Client preference for S355 / stock availability"
+                className="w-full bg-surface border border-border rounded px-2 py-1 text-xs text-white placeholder-muted/40 focus:outline-none focus:border-accent"
+              />
+            </div>
+            <button
+              type="button"
+              disabled={!canApply}
+              onClick={() => {
+                if (!canApply || !selectedSection) return
+                onApplyOverride({
+                  active: true,
+                  section: selectedSection,
+                  reason: draftReason.trim(),
+                })
+                setOverrideOpen(false)
+              }}
+              className={`px-3 py-1.5 text-xs font-medium rounded border transition-colors ${
+                canApply
+                  ? 'border-amber-500/60 text-amber-400 hover:bg-amber-500/20'
+                  : 'border-border text-muted opacity-40 cursor-not-allowed'
+              }`}
+            >
+              Apply Override
+            </button>
+          </div>
+        )}
       </div>
     </div>
   )
@@ -1413,10 +1628,17 @@ export default function Step3() {
     calculation_results,
     phase1_result,
     confirmed_section,
+    available_sections,
+    section_override,
+    engine_section_result,
     setDesignParameters,
     setCalculationResults,
     setPhase1Result,
     setConfirmedSection,
+    setAvailableSections,
+    setSectionOverride,
+    clearSectionOverride,
+    setEngineSectionResult,
     confirmStep3,
     step3_confirmed,
   } = useProjectStore()
@@ -1429,6 +1651,10 @@ export default function Step3() {
   const [isOptimising, setIsOptimising] = useState(false)
   const [optimiseResult, setOptimiseResult] = useState<OptimiseResult | null>(null)
   const [sectionCleared, setSectionCleared] = useState(false)
+
+  // ── Override supplier search — on-demand only, not auto-fired ──
+  const [overrideSuppliers, setOverrideSuppliers] = useState<SupplierResult | null>(null)
+  const [overrideSuppliersLoading, setOverrideSuppliersLoading] = useState(false)
 
   const set = (partial: Partial<DesignParameters>) => setDesignParameters(partial)
   const numericValue = (v: number | null | undefined) => (v == null ? '' : String(v))
@@ -1578,6 +1804,10 @@ export default function Step3() {
       setCalculationResults(null)
       setOptimiseResult(null)
       setSectionCleared(true)
+      clearSectionOverride()
+      setEngineSectionResult(null)
+      setOverrideSuppliers(null)
+      setOverrideSuppliersLoading(false)
     }
   // Only fire on structural param changes, not on the results themselves
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1686,6 +1916,23 @@ export default function Step3() {
         section_result: mapSectionResult(data.section_result),
       }
       setPhase1Result(phase1)
+      if (phase1.section_result.all_sections?.length) {
+        setAvailableSections(phase1.section_result.all_sections)
+      }
+      // Snapshot engine recommendation for comparison table — never overwritten by override
+      const sr = phase1.section_result
+      setEngineSectionResult({
+        designation: sr.section.designation,
+        mass_kg_per_m: sr.section.mass_kg_per_m,
+        fy_N_per_mm2: sr.section.fy_N_per_mm2,
+        UR_moment: sr.checks.UR_moment,
+        UR_deflection: sr.checks.UR_deflection,
+        UR_shear: sr.checks.UR_shear,
+        section_class: null,   // available only after Phase 2 steel result
+        Mb_Rd_kNm: null,
+        M_Ed_kNm: sr.M_Ed_kNm,
+        pass: sr.checks.pass,
+      })
     } catch (e) {
       setApiError(e instanceof Error ? e.message : 'Phase 1 failed')
     } finally {
@@ -1755,6 +2002,27 @@ export default function Step3() {
     setCalculationResults(null)
     setOptimiseResult(null)
     setSectionCleared(false)
+    clearSectionOverride()
+    setOverrideSuppliers(null)
+    setOverrideSuppliersLoading(false)
+  }
+
+  // Apply override: commit to store, trigger Phase 2 immediately
+  function handleApplyOverride(ov: SectionOverride) {
+    if (!ov.section) return
+    setSectionOverride(ov)
+    setOverrideSuppliers(null)
+    handleRunPhase2(ov.section)
+  }
+
+  // Clear override: restore engine section and re-run Phase 2 for it
+  // Supplier panel reverts to Phase 1 list automatically (no fetch needed)
+  function handleClearOverride() {
+    clearSectionOverride()
+    setOverrideSuppliers(null)
+    setOverrideSuppliersLoading(false)
+    const engineSec = phase1_result?.section_result.section
+    if (engineSec) handleRunPhase2(engineSec)
   }
 
   async function handleOptimise() {
@@ -2257,8 +2525,8 @@ export default function Step3() {
 
             <Phase1Progress active={phase1Loading} />
 
-            {/* Run Calculations button — shown when no Phase 1 result, or when confirmed section (re-run) */}
-            {(!phase1Complete || confirmed_section != null) && (
+            {/* Run Calculations button — hidden when override active (recalc fires automatically) */}
+            {(!phase1Complete || confirmed_section != null) && !section_override.active && (
               <div className="flex items-center gap-3">
                 <button
                   type="button"
@@ -2291,11 +2559,22 @@ export default function Step3() {
               <SectionCard
                 result={phase1_result!.section_result}
                 onOptimise={handleOptimise}
-                onConfirmAndContinue={() => handleRunPhase2(phase1_result!.section_result.section)}
+                onConfirmAndContinue={() => {
+                  const sec = section_override.active && section_override.section
+                    ? section_override.section
+                    : phase1_result!.section_result.section
+                  handleRunPhase2(sec)
+                }}
                 isOptimising={isOptimising}
                 isPhase2Loading={phase2Loading}
                 isPhase1Loading={phase1Loading}
                 canRun={canRun}
+                availableSections={available_sections}
+                sectionOverride={section_override}
+                onApplyOverride={handleApplyOverride}
+                onClearOverride={handleClearOverride}
+                overrideSuppliers={overrideSuppliers}
+                overrideSuppliersLoading={overrideSuppliersLoading}
               />
             )}
 
@@ -2310,22 +2589,92 @@ export default function Step3() {
 
             {/* Confirmed section banner — shown after Phase 2 runs */}
             {confirmed_section && (
-              <div className="flex items-center gap-2 rounded border border-green-500/40 bg-green-500/10 px-4 py-2.5 text-sm text-green-400">
-                <span className="font-bold">✓</span>
-                <span>
-                  Section confirmed: <span className="font-mono font-semibold">UB {confirmed_section.designation}</span>
-                  {' '}({confirmed_section.fy_N_per_mm2 >= 355 ? 'S355' : 'S275'}, {confirmed_section.mass_kg_per_m} kg/m)
-                </span>
-                <button
-                  type="button"
-                  onClick={handleChangeSection}
-                  className="ml-auto text-xs text-muted hover:text-accent underline"
-                >
-                  Change
-                </button>
+              <div className="space-y-2">
+                <div className={`flex items-center gap-2 rounded border px-4 py-2.5 text-sm ${section_override.active ? 'border-amber-500/50 bg-amber-500/10 text-amber-300' : 'border-green-500/40 bg-green-500/10 text-green-400'}`}>
+                  <span className="font-bold">{section_override.active ? '⚠' : '✓'}</span>
+                  <span>
+                    {section_override.active ? 'Override active: ' : 'Section confirmed: '}
+                    <span className="font-mono font-semibold">UB {confirmed_section.designation}</span>
+                    {' '}({confirmed_section.fy_N_per_mm2 >= 355 ? 'S355' : 'S275'}, {confirmed_section.mass_kg_per_m} kg/m)
+                  </span>
+                  <div className="ml-auto flex gap-3">
+                    {section_override.active && (
+                      <button
+                        type="button"
+                        onClick={handleClearOverride}
+                        className="text-xs text-amber-400/70 hover:text-amber-300 underline"
+                      >
+                        Clear override
+                      </button>
+                    )}
+                    <button
+                      type="button"
+                      onClick={handleChangeSection}
+                      className="text-xs text-muted hover:text-accent underline"
+                    >
+                      Change section
+                    </button>
+                  </div>
+                </div>
+
+                {/* Supplier panel — persisted here once SectionCard unmounts */}
+                {section_override.active ? (
+                  // Override active: on-demand search for the override section
+                  <div className="space-y-2">
+                    {!overrideSuppliers && !overrideSuppliersLoading && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const sec = confirmed_section
+                          const grade = sec.fy_N_per_mm2 >= 355 ? 'S355' : 'S275'
+                          setOverrideSuppliersLoading(true)
+                          fetch('/api/suppliers', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ designation: sec.designation, grade, mass_kg_per_m: sec.mass_kg_per_m }),
+                          })
+                            .then((r) => r.json())
+                            .then((result: SupplierResult) => setOverrideSuppliers(result))
+                            .catch(() => setOverrideSuppliers(null))
+                            .finally(() => setOverrideSuppliersLoading(false))
+                        }}
+                        className="text-xs text-muted hover:text-white underline transition-colors"
+                      >
+                        Find suppliers for UB {confirmed_section.designation}
+                      </button>
+                    )}
+                    <SupplierPanel
+                      suppliers={overrideSuppliers ?? undefined}
+                      designation={confirmed_section.designation}
+                      grade={confirmed_section.fy_N_per_mm2 >= 355 ? 'S355' : 'S275'}
+                      isLoading={overrideSuppliersLoading}
+                    />
+                  </div>
+                ) : (
+                  // Normal confirm: show Phase 1 supplier results as-is
+                  <SupplierPanel
+                    suppliers={phase1_result?.section_result.suppliers}
+                    designation={confirmed_section.designation}
+                    grade={confirmed_section.fy_N_per_mm2 >= 355 ? 'S355' : 'S275'}
+                    isLoading={false}
+                  />
+                )}
               </div>
             )}
           </div>
+
+          {/* Override comparison table — shown when override active and Phase 2 done */}
+          {section_override.active &&
+            section_override.section &&
+            engine_section_result &&
+            calculation_results?.steel && (
+              <SectionComparisonTable
+                engineResult={engine_section_result}
+                overrideSection={section_override.section}
+                overrideSteel={calculation_results.steel}
+                overrideReason={section_override.reason}
+              />
+            )}
 
           {/* ── Results (shown from Phase 1 onwards) ── */}
           {(windResult || calculation_results) && (

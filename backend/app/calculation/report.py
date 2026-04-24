@@ -553,7 +553,7 @@ def _section_wind(wind: dict, dp: dict) -> list:
     return story
 
 
-def _section_steel(steel: dict, dp: dict) -> list:
+def _section_steel(steel: dict, dp: dict, section_override: dict | None = None) -> list:
     story: list = []
     story.append(_section_title("Steel Post Design", "3"))
     story.append(_sp(3))
@@ -579,6 +579,28 @@ def _section_steel(steel: dict, dp: dict) -> list:
         ("Deflection limit", f"L / {int(steel.get('deflection_limit_n', 65))}"),
     ]))
     story.append(_sp(3))
+
+    # Override note — shown when engineer has manually selected a section
+    if section_override and section_override.get("active"):
+        ov_reason = section_override.get("reason") or "No reason recorded."
+        ov_desig  = (section_override.get("section") or {}).get("designation", desig)
+        note_style = ParagraphStyle(
+            "override_note",
+            fontName="Helvetica",
+            fontSize=8,
+            textColor=colors.HexColor("#B45309"),
+            backColor=colors.HexColor("#FEF3C7"),
+            borderPad=6,
+            borderColor=colors.HexColor("#D97706"),
+            borderWidth=0.5,
+            leading=11,
+        )
+        story.append(Paragraph(
+            f"<b>Engineer override:</b> Section UB {ov_desig} was manually selected, "
+            f"replacing the optimiser result. Reason: {ov_reason}",
+            note_style,
+        ))
+        story.append(_sp(3))
 
     # Section properties
     rows = [
@@ -1463,11 +1485,12 @@ def generate_pdf(payload: dict) -> bytes:
       design_parameters -- dp fields (post_spacing, subframe_spacing, etc.)
       calculation_results -- {wind, steel, connection, subframe, lifting, foundation}
     """
-    project_info = payload.get("project_info", {})
-    meta         = payload.get("meta", {})
-    report_meta  = payload.get("report_meta", {})
-    dp           = payload.get("design_parameters", {})
-    calc         = payload.get("calculation_results", {})
+    project_info     = payload.get("project_info", {})
+    meta             = payload.get("meta", {})
+    report_meta      = payload.get("report_meta", {})
+    dp               = payload.get("design_parameters", {})
+    calc             = payload.get("calculation_results", {})
+    section_override = payload.get("section_override") or {}
 
     pname   = project_info.get("project_name", "Unnamed Project")
     job_ref = report_meta.get("job_reference", "") or ""
@@ -1506,7 +1529,7 @@ def generate_pdf(payload: dict) -> bytes:
     story.append(PageBreak())
 
     if calc.get("steel"):
-        story.extend(_section_steel(calc["steel"], dp))
+        story.extend(_section_steel(calc["steel"], dp, section_override))
         story.append(PageBreak())
 
     if calc.get("connection"):

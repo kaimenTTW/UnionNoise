@@ -1,6 +1,6 @@
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
-import type { BarrierType, CalibrationData, CalculationResults, DesignParameters, OverridableValue, Phase1Result, Polyline, ProjectInfo, ProjectMeta, SegmentRow, SiteData, SteelSection } from '../types'
+import type { BarrierType, CalibrationData, CalculationResults, DesignParameters, OverridableValue, Phase1Result, Polyline, ProjectInfo, ProjectMeta, SectionCheckResult, SectionOverride, SegmentRow, SiteData, SteelSection } from '../types'
 
 interface ProjectStore {
   project_info: ProjectInfo
@@ -12,6 +12,9 @@ interface ProjectStore {
   step3_confirmed: boolean
   step4_confirmed: boolean
   confirmed_section: SteelSection | null
+  available_sections: SteelSection[]
+  section_override: SectionOverride
+  engine_section_result: SectionCheckResult | null
   step4_notes: Record<string, string>
 
   setProjectInfo: (partial: Partial<ProjectInfo>) => void
@@ -32,6 +35,10 @@ interface ProjectStore {
   setCalculationResults: (results: CalculationResults | null) => void
   setPhase1Result: (result: Phase1Result | null) => void
   setConfirmedSection: (section: SteelSection | null) => void
+  setAvailableSections: (sections: SteelSection[]) => void
+  setSectionOverride: (override: Partial<SectionOverride>) => void
+  clearSectionOverride: () => void
+  setEngineSectionResult: (result: SectionCheckResult | null) => void
   setStep4Note: (moduleId: string, note: string) => void
   confirmStep1: () => void
   confirmStep2: () => void
@@ -94,6 +101,12 @@ const defaultDesignParameters: DesignParameters = {
   barrier_length_m: null,
   has_return_corners: false,
   remarks: '',
+}
+
+const defaultSectionOverride: SectionOverride = {
+  active: false,
+  section: null,
+  reason: '',
 }
 
 const defaultMeta: ProjectMeta = {
@@ -178,6 +191,9 @@ export const useProjectStore = create<ProjectStore>()(
       step3_confirmed: false,
       step4_confirmed: false,
       confirmed_section: null,
+      available_sections: [],
+      section_override: defaultSectionOverride,
+      engine_section_result: null,
       step4_notes: {},
 
       setProjectInfo: (partial) =>
@@ -280,6 +296,15 @@ export const useProjectStore = create<ProjectStore>()(
 
       setConfirmedSection: (section) => set({ confirmed_section: section }),
 
+      setAvailableSections: (sections) => set({ available_sections: sections }),
+
+      setSectionOverride: (partial) =>
+        set((s) => ({ section_override: { ...s.section_override, ...partial } })),
+
+      clearSectionOverride: () => set({ section_override: defaultSectionOverride }),
+
+      setEngineSectionResult: (result) => set({ engine_section_result: result }),
+
       setStep4Note: (moduleId, note) =>
         set((s) => ({ step4_notes: { ...s.step4_notes, [moduleId]: note } })),
 
@@ -304,6 +329,9 @@ export const useProjectStore = create<ProjectStore>()(
           step3_confirmed: false,
           step4_confirmed: false,
           confirmed_section: null,
+          available_sections: [],
+          section_override: defaultSectionOverride,
+          engine_section_result: null,
           step4_notes: {},
         }),
     }),
