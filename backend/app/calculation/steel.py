@@ -45,6 +45,7 @@ def _check_section(
     Lcr_mm: float,
     post_length_m: float,
     deflection_limit_n: float,
+    condition_factor: float = 1.0,
 ) -> dict:
     """
     Run LTB, deflection, and shear checks on a single section dict from the parts library.
@@ -136,13 +137,16 @@ def _check_section(
         }
 
     # Class 1/2: plastic modulus; Class 3: elastic modulus
+    # condition_factor reduces effective Wpl for used/reconditioned sections.
     class3_wel_used = section_class == 3
+    Wpl_effective_cm3 = sec["Wpl_y_cm3"] * condition_factor
     if class3_wel_used:
-        W_y_mm3 = (sec.get("Wel_y_cm3") or sec["Wpl_y_cm3"]) * 1e3
+        Wel_effective_cm3 = (sec.get("Wel_y_cm3") or sec["Wpl_y_cm3"]) * condition_factor
+        W_y_mm3 = Wel_effective_cm3 * 1e3
     else:
-        W_y_mm3 = sec["Wpl_y_cm3"] * 1e3
+        W_y_mm3 = Wpl_effective_cm3 * 1e3
 
-    Wpl_y_mm3 = sec["Wpl_y_cm3"] * 1e3
+    Wpl_y_mm3 = Wpl_effective_cm3 * 1e3
     Iz_mm4 = sec["Iz_cm4"] * 1e4
     Iy_mm4 = sec["Iy_cm4"] * 1e4
     It_mm4 = sec["It_cm4"] * 1e4
@@ -222,6 +226,7 @@ def _check_section(
         "Lcr_mm": Lcr_mm,
         "post_length_m": post_length_m,
         "deflection_limit_n": deflection_limit_n,
+        "condition_factor": condition_factor,
         "pass": passed,
     }
 

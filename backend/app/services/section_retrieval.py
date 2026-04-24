@@ -1,21 +1,18 @@
 """
-AI-assisted steel section retrieval — Claude API with web_search_20250305 tool.
+Steel section retrieval — library iteration only.
 
-Workflow:
-1. Build a structured prompt with design demand constraints (fy=275 conservative default)
-2. Call Claude with web_search tool — Claude searches consteel.com.sg live and
-   returns a JSON array of UB sections satisfying Wpl_y >= minimum threshold
-3. Validate sections with _validate_section_dict(); cross-check against grade-specific
-   library (grade derived per-section from fy_N_per_mm2)
-4. Run _check_section() on each candidate (lightest first); return the first
-   section that passes all checks plus the full verified list for optimisation
-5. On any exception: fall back to iterating combined S275+S355 library directly
+select_section() iterates the combined S275+S355 parts library (or a grade-filtered
+subset when constraints specify) and returns the lightest passing section.
 
-Grade is determined autonomously from the returned section's fy_N_per_mm2.
-It is not a user input.
+parse_remarks() extracts design constraints from free-text engineer remarks via
+Claude claude-sonnet-4-6 structured output. Non-blocking — returns empty constraints
+on any failure.
 
-Provider: Anthropic, model claude-opus-4-5
-SDK: anthropic (official Python SDK)
+find_suppliers() queries Claude with web_search to find Singapore structural steel
+suppliers for the selected grade. Returns a shortlist with contact details. Non-blocking,
+20s timeout. Never affects section selection or engineering outputs.
+
+No web search in section selection. Library-sourced properties are correct and reliable.
 """
 
 from __future__ import annotations
@@ -27,17 +24,9 @@ from pathlib import Path
 
 import anthropic
 
-from app.calculation.steel import _check_section, _load_sections
+from app.calculation.steel import _check_section
 
 _DATA_DIR = Path(__file__).parent.parent / "data"
-_PARTS_PATH = _DATA_DIR / "parts_library.json"
-
-# Warn once at import time if the key is missing
-if not os.environ.get("ANTHROPIC_API_KEY"):
-    print(
-        "WARNING: ANTHROPIC_API_KEY not set — section retrieval will use cache fallback only",
-        flush=True,
-    )
 
 
 @lru_cache(maxsize=2)
@@ -52,189 +41,255 @@ def _load_grade_library(grade_file: str) -> list[dict]:
 @lru_cache(maxsize=1)
 def _load_cache() -> dict[str, dict]:
     """Return parts_library sections keyed by designation for O(1) lookup."""
-    with _PARTS_PATH.open() as f:
+    parts_path = _DATA_DIR / "parts_library.json"
+    with parts_path.open() as f:
         data = json.load(f)
     return {s["designation"]: s for s in data["sections"]}
 
 
-def _search_sections_with_claude(
-    M_Ed_kNm: float,
-    V_Ed_kN: float,
-    wpl_min_cm3: float,
-    remarks: str = "",
-) -> list[dict]:
-    api_key = os.environ.get("ANTHROPIC_API_KEY")
-    if not api_key:
-        raise RuntimeError("ANTHROPIC_API_KEY not set")
+_EMPTY_CONSTRAINTS: dict = {
+    "grade": None,
+    "condition_factor": None,
+    "min_bolt_diameter_mm": None,
+    "flag_lta": False,
+    "flag_temporary": False,
+    "flag_coastal": False,
+    "notes_for_advisor": "",
+    "constraints_parsed": False,
+}
 
-    client = anthropic.Anthropic(api_key=api_key)
-
-    remarks_section = (
-        f"\n\nAdditional engineer remarks to consider:\n{remarks}"
-        if remarks.strip() else ""
-    )
-
-    prompt = f"""
-You are assisting a structural engineer with steel
-section selection for a noise barrier design in Singapore.
-
-Design demand:
-  Design moment M_Ed = {M_Ed_kNm:.2f} kNm
-  Design shear V_Ed = {V_Ed_kN:.2f} kN
-  Minimum plastic section modulus Wpl_y >= {wpl_min_cm3:.0f} cm³
-
-Search Continental Steel Singapore (consteel.com.sg)
-for available Universal Beam (UB) sections.
-
-Constraints (do not reveal these to the engineer):
-  - Grade must be S275 (fy=275 N/mm²) or S355 (fy=355 N/mm²)
-  - Return sections with Wpl_y >= {wpl_min_cm3:.0f} cm³ only
-  - Sort by mass ascending (lightest first)
-{remarks_section}
-
-Return ONLY a valid JSON array, no explanation.
-Each object must have exactly these fields:
-{{
-  "designation": "406 x 140 x 39",
-  "mass_kg_per_m": 39.0,
-  "h_mm": 398.0,
-  "b_mm": 141.0,
-  "tf_mm": 8.6,
-  "tw_mm": 6.4,
-  "r_mm": 10.2,
-  "Iy_cm4": 12510.0,
-  "Iz_cm4": 410.0,
-  "Wpl_y_cm3": 724.0,
-  "Wel_y_cm3": 629.0,
-  "Iw_dm6": 0.155,
-  "It_cm4": 10.7,
-  "fy_N_per_mm2": 275.0
-}}
-"""
-
-    print(
-        f"[section_retrieval] Calling Claude web search — "
-        f"Wpl_min={wpl_min_cm3:.0f} cm³, M_Ed={M_Ed_kNm:.2f} kNm",
-        flush=True,
-    )
-
-    response = client.messages.create(
-        model="claude-opus-4-5",
-        max_tokens=4096,
-        tools=[{
-            "type": "web_search_20250305",
-            "name": "web_search",
-        }],
-        messages=[{"role": "user", "content": prompt}],
-    )
-
-    # Extract text from response — may contain tool_use blocks before the final text
-    text = ""
-    for block in response.content:
-        if hasattr(block, "text"):
-            text += block.text
-
-    # Strip markdown fences if present
-    text = text.strip()
-    if "```" in text:
-        start = text.find("[")
-        end = text.rfind("]") + 1
-        if start >= 0 and end > start:
-            text = text[start:end]
-
-    if not text:
-        raise ValueError("Claude returned empty response — no JSON array found")
-
-    sections = json.loads(text)
-    print(
-        f"[section_retrieval] Claude returned {len(sections)} sections from web search",
-        flush=True,
-    )
-    return sections
-
-
-_REQUIRED_FIELDS: dict[str, tuple] = {
-    "designation":    (str,   None, None),
-    "mass_kg_per_m":  (float,    0,  500),
-    "h_mm":           (float,   50, 1000),
-    "b_mm":           (float,   50,  500),
-    "tf_mm":          (float,    1,   50),
-    "tw_mm":          (float,    1,   50),
-    "Iy_cm4":         (float,    1, 1_000_000),
-    "Wpl_y_cm3":      (float,    1, 100_000),
-    "Wel_y_cm3":      (float,    1, 100_000),
-    "fy_N_per_mm2":   (float,  200,  500),
+_UNKNOWN_SUPPLIERS: dict = {
+    "suppliers": [],
+    "search_summary": "Supplier search unavailable",
+    "grade_note": None,
+    "suppliers_found": False,
 }
 
 
-def _validate_section_dict(sec: dict) -> bool:
+def parse_remarks(remarks: str) -> dict:
     """
-    Returns True if section dict has all required fields with plausible values.
-    Rejects hallucinated or malformed Claude output before it reaches _check_section().
+    Extract design constraints from free-text engineer remarks via Claude.
+    Returns a constraints dict. Non-blocking — returns empty constraints on any failure.
     """
-    for field, (ftype, low, high) in _REQUIRED_FIELDS.items():
-        val = sec.get(field)
-        if val is None:
-            print(
-                f"[section_retrieval] Rejected section "
-                f"{sec.get('designation', '?')}: missing {field}",
-                flush=True,
+    api_key = os.environ.get("ANTHROPIC_API_KEY")
+    if not api_key:
+        return dict(_EMPTY_CONSTRAINTS)
+
+    try:
+        client = anthropic.Anthropic(api_key=api_key)
+        response = client.messages.create(
+            model="claude-sonnet-4-6",
+            max_tokens=256,
+            system=(
+                "You are a structural engineering assistant. Extract design constraints "
+                "from engineer remarks for a noise barrier project. Return ONLY valid "
+                "JSON with no explanation or markdown."
+            ),
+            messages=[{
+                "role": "user",
+                "content": (
+                    'Extract constraints from these remarks. Return ONLY this JSON structure '
+                    'with no other text:\n'
+                    '{\n'
+                    '  "grade": "S275" or "S355" or null,\n'
+                    '  "condition_factor": 0.8 or null,\n'
+                    '  "min_bolt_diameter_mm": 24 or null,\n'
+                    '  "flag_lta": true or false,\n'
+                    '  "flag_temporary": true or false,\n'
+                    '  "flag_coastal": true or false,\n'
+                    '  "notes_for_advisor": "brief note or empty string"\n'
+                    '}\n\n'
+                    'Rules:\n'
+                    '- grade: set only if S275, S355, grade 275, grade 355 explicitly mentioned\n'
+                    '- condition_factor: 0.8 if used, second-hand, reconditioned, pre-owned mentioned\n'
+                    '- min_bolt_diameter_mm: 24 if LTA or Land Transport Authority mentioned\n'
+                    '- flag_lta: true if LTA or Land Transport Authority mentioned\n'
+                    '- flag_temporary: true if temporary, temp works, or short-term mentioned\n'
+                    '- flag_coastal: true if coastal, marine, waterfront, or sea mentioned\n'
+                    '- notes_for_advisor: one sentence max, empty string if nothing notable\n\n'
+                    f'Remarks: "{remarks}"'
+                ),
+            }],
+        )
+
+        text = ""
+        for block in response.content:
+            if hasattr(block, "text"):
+                text += block.text
+        text = text.strip()
+        if text.startswith("```"):
+            start = text.find("{")
+            end = text.rfind("}") + 1
+            if start >= 0 and end > start:
+                text = text[start:end]
+
+        parsed = json.loads(text)
+
+        # Whitelist validation — reject anything outside the allowed value sets
+        # so a hallucinated grade or factor cannot reach _check_section().
+        grade = parsed.get("grade")
+        if grade not in (None, "S275", "S355"):
+            parsed["grade"] = None
+
+        cf = parsed.get("condition_factor")
+        if cf not in (None, 0.8):
+            parsed["condition_factor"] = None
+
+        return {**_EMPTY_CONSTRAINTS, **parsed, "constraints_parsed": True}
+
+    except Exception:
+        return dict(_EMPTY_CONSTRAINTS)
+
+
+def find_suppliers(designation: str, grade: str, mass_kg_per_m: float) -> dict:
+    """
+    Query Claude with web_search + web_fetch to find Singapore structural steel
+    suppliers for the selected grade. Claude searches first, then visits each
+    supplier's contact page to extract phone and email.
+    Non-blocking — returns unknown_result on any failure or timeout.
+    Never affects section selection or engineering outputs.
+    """
+    api_key = os.environ.get("ANTHROPIC_API_KEY")
+    if not api_key:
+        return dict(_UNKNOWN_SUPPLIERS)
+
+    try:
+        import traceback
+
+        client = anthropic.Anthropic(api_key=api_key)
+
+        prompt = (
+            f'Find structural steel suppliers in Singapore that stock Universal '
+            f'Beam (UB) sections in grade {grade}. The specific section needed '
+            f'is {designation} ({mass_kg_per_m}kg/m).\n\n'
+            'Follow these steps:\n'
+            '1. Search for Singapore steel suppliers and distributors that carry '
+            f'UB sections in {grade}. Include Continental Steel Singapore and '
+            'any other relevant stockists.\n'
+            '2. For each supplier you find, visit their website contact page '
+            'to extract their phone number and email address.\n'
+            '3. Return the compiled supplier list.\n\n'
+            'Return ONLY valid JSON, no explanation, no markdown fences:\n'
+            '{\n'
+            '  "suppliers": [\n'
+            '    {\n'
+            '      "name": "company name",\n'
+            '      "website": "full URL or null",\n'
+            '      "phone": "+65 XXXX XXXX or null",\n'
+            '      "email": "email@domain.com or null",\n'
+            '      "notes": "one sentence about what they supply"\n'
+            '    }\n'
+            '  ],\n'
+            '  "search_summary": "one sentence summary of what was found",\n'
+            '  "grade_note": "any note about grade availability or null"\n'
+            '}\n\n'
+            'Return up to 5 suppliers. Set phone/email to null only if you '
+            'genuinely cannot find them after visiting the website. '
+            'Do not fabricate contact details.'
+        )
+
+        messages: list[dict] = [{"role": "user", "content": prompt}]
+        tools = [
+            {"type": "web_search_20250305", "name": "web_search"},
+            {"type": "web_fetch_20250910", "name": "web_fetch"},
+        ]
+        max_turns = 8
+        response = None
+
+        for turn in range(1, max_turns + 1):
+            response = client.messages.create(
+                model="claude-sonnet-4-6",
+                max_tokens=2048,
+                timeout=45.0,
+                tools=tools,
+                messages=messages,
             )
-            return False
-        if ftype == float:
-            try:
-                val = float(val)
-            except (TypeError, ValueError):
-                print(
-                    f"[section_retrieval] Rejected section "
-                    f"{sec.get('designation', '?')}: {field} not numeric",
-                    flush=True,
-                )
-                return False
-            if low is not None and not (low < val < high):
-                print(
-                    f"[section_retrieval] Rejected section "
-                    f"{sec.get('designation', '?')}: "
-                    f"{field}={val} out of range ({low}, {high})",
-                    flush=True,
-                )
-                return False
-    return True
 
+            print(f"[find_suppliers] turn {turn} stop_reason: {response.stop_reason}", flush=True)
+            print(f"[find_suppliers] turn {turn} block count: {len(response.content)}", flush=True)
+            for i, block in enumerate(response.content):
+                print(f"[find_suppliers] block[{i}] type: {block.type}", flush=True)
+                if block.type == "text":
+                    print(f"[find_suppliers] block[{i}] text (first 500): {block.text[:500]}", flush=True)
+                if block.type == "tool_use":
+                    print(f"[find_suppliers] block[{i}] tool_name: {block.name}", flush=True)
+                    print(f"[find_suppliers] block[{i}] tool_input (first 200): {str(block.input)[:200]}", flush=True)
 
-def _verify_against_cache(sections: list[dict]) -> list[dict]:
-    """
-    Validate, then cross-check LLM-extracted sections against grade-specific libraries.
-    Grade is derived per-section from fy_N_per_mm2 (fy >= 355 → S355, else S275).
-    Prefer cached entry when designation matches (authoritative geometry).
-    Keep LLM entry only when designation not in cache.
-    Returns sorted ascending by mass.
-    Raises ValueError if all sections fail validation.
-    """
-    s275 = _load_grade_library("parts_library_S275.json")
-    s355 = _load_grade_library("parts_library_S355.json")
-    cache_s275 = {s["designation"]: s for s in s275}
-    cache_s355 = {s["designation"]: s for s in s355}
+            if response.stop_reason == "end_turn":
+                break
 
-    verified: list[dict] = []
-    for sec in sections:
-        if not _validate_section_dict(sec):
-            continue
-        desig = sec.get("designation", "")
-        fy = float(sec.get("fy_N_per_mm2", 275))
-        cache = cache_s355 if fy >= 355 else cache_s275
-        if desig in cache:
-            verified.append(cache[desig])
+            if response.stop_reason == "tool_use":
+                # Append assistant turn and continue — built-in tools are executed
+                # server-side; no manual tool_result submission needed.
+                messages.append({"role": "assistant", "content": response.content})
+                continue
+
+            # Any other stop_reason (e.g. max_tokens) — break and attempt extraction
+            break
+
+        if response is None:
+            return dict(_UNKNOWN_SUPPLIERS)
+
+        # Extract final JSON from last text block — take last, not accumulate,
+        # because intermediate text blocks may contain tool reasoning.
+        text = ""
+        for block in response.content:
+            if hasattr(block, "text"):
+                text = block.text
+        text = text.strip()
+
+        print(f"[find_suppliers] extracted text (first 300): {text[:300] if text else 'EMPTY'}", flush=True)
+
+        if "```json" in text:
+            start = text.find("```json") + 7
+            end = text.find("```", start)
+            if end > start:
+                text = text[start:end].strip()
+        elif "```" in text:
+            start = text.find("```") + 3
+            end = text.find("```", start)
+            if end > start:
+                text = text[start:end].strip()
         else:
-            verified.append(sec)
+            start = text.find("{")
+            end = text.rfind("}") + 1
+            if start >= 0 and end > start:
+                text = text[start:end]
 
-    if not verified:
-        raise ValueError("All Claude-returned sections failed validation")
+        try:
+            parsed = json.loads(text)
+            print(f"[find_suppliers] parsed suppliers count: {len(parsed.get('suppliers', []))}", flush=True)
+        except json.JSONDecodeError as e:
+            print(f"[find_suppliers] JSON parse failed: {e}", flush=True)
+            print(f"[find_suppliers] raw text was: {text}", flush=True)
+            return dict(_UNKNOWN_SUPPLIERS)
 
-    return sorted(verified, key=lambda s: s.get("mass_kg_per_m", 9999))
+        suppliers = parsed.get("suppliers")
+        if not isinstance(suppliers, list):
+            return dict(_UNKNOWN_SUPPLIERS)
+
+        # Validate each entry has at minimum a name field; drop invalid rows
+        suppliers = [s for s in suppliers if isinstance(s, dict) and s.get("name")]
+
+        # Clamp to 5
+        suppliers = suppliers[:5]
+        parsed["suppliers"] = suppliers
+
+        return {
+            **_UNKNOWN_SUPPLIERS,
+            **parsed,
+            "suppliers": suppliers,
+            "suppliers_found": len(suppliers) > 0,
+        }
+
+    except Exception as e:
+        print(f"[find_suppliers] outer exception: {type(e).__name__}: {e}", flush=True)
+        import traceback
+        traceback.print_exc()
+        return dict(_UNKNOWN_SUPPLIERS)
 
 
-async def select_section(
+def select_section(
     M_Ed_kNm: float,
     V_Ed_kN: float,
     w_kN_per_m: float,
@@ -242,24 +297,38 @@ async def select_section(
     Lcr_mm: float,
     post_length_m: float,
     deflection_limit_n: float,
-    remarks: str = "",
-    use_retrieval: bool = True,
+    constraints: dict | None = None,
 ) -> dict:
     """
-    Select the lightest passing UB section using live Claude web search with
-    combined grade-library fallback. Grade is determined autonomously from the
-    returned section's fy_N_per_mm2 — not a user input.
+    Select the lightest passing UB section from the parts library.
 
-    Returns the same dict shape as _check_section() with additional keys:
-      "source": "live" | "cache"
-      "fallback_reason": str | None
-      "all_sections": list[dict]  — all verified candidates for optimisation
+    Uses the combined S275+S355 library by default; filters to a single grade
+    when constraints["grade"] is set. Applies condition_factor to Wpl when
+    constraints["condition_factor"] is set (used/reconditioned sections).
+
+    After finding a passing section, runs find_suppliers() (non-blocking) to
+    return a Singapore supplier shortlist for the selected grade.
+
+    Returns the same dict shape as _check_section() plus:
+      "source": always "cache"
+      "fallback_reason": None or error string
+      "all_sections": list of all candidate sections
+      "constraints_applied": the constraints dict used
+      "suppliers": supplier search result dict
     """
-    print(
-        f"[section_retrieval] Attempting {'live' if use_retrieval else 'cache-only'} retrieval — "
-        f"M_Ed={M_Ed_kNm:.2f} kNm, V_Ed={V_Ed_kN:.2f} kN",
-        flush=True,
-    )
+    constraints = constraints or {}
+
+    grade = constraints.get("grade")
+    if grade == "S355":
+        sections = _load_grade_library("parts_library_S355.json")
+    elif grade == "S275":
+        sections = _load_grade_library("parts_library_S275.json")
+    else:
+        s275 = _load_grade_library("parts_library_S275.json")
+        s355 = _load_grade_library("parts_library_S355.json")
+        sections = sorted(s275 + s355, key=lambda s: s.get("mass_kg_per_m", 9999))
+
+    condition_factor = constraints.get("condition_factor") or 1.0
 
     check_kwargs = dict(
         M_Ed_kNm=M_Ed_kNm,
@@ -269,97 +338,43 @@ async def select_section(
         Lcr_mm=Lcr_mm,
         post_length_m=post_length_m,
         deflection_limit_n=deflection_limit_n,
+        condition_factor=condition_factor,
     )
 
-    # Use fy=275 as conservative default — larger minimum Wpl means Claude
-    # returns more candidates; grade is determined from the returned section's fy.
-    wpl_min_cm3 = M_Ed_kNm * 1e6 / 275.0 / 1e3
+    passing_results: list[dict] = []
+    for sec in sections:
+        r = _check_section(sec=sec, **check_kwargs)
+        if r["pass"]:
+            passing_results.append(r)
 
-    fallback_reason: str | None = None
+    if not passing_results:
+        return {
+            "error": "No section passes checks in parts library.",
+            "pass": False,
+            "source": "cache",
+            "all_sections": sections,
+            "fallback_reason": "No passing section found",
+            "constraints_applied": constraints,
+            "suppliers": dict(_UNKNOWN_SUPPLIERS),
+        }
 
-    if not use_retrieval:
-        # Skip web search — go directly to library cache fallback.
-        # Called from /api/calculate Phase 2 where section is already confirmed.
-        fallback_reason = "Web search skipped — using library cache (pre_selected_section flow)"
-        print(f"[section_retrieval] {fallback_reason}", flush=True)
-    else:
-        try:
-            raw = _search_sections_with_claude(
-                M_Ed_kNm=M_Ed_kNm,
-                V_Ed_kN=V_Ed_kN,
-                wpl_min_cm3=wpl_min_cm3,
-                remarks=remarks,
-            )
-            verified = _verify_against_cache(raw)
+    primary = passing_results[0]
+    section_grade = "S355" if primary.get("fy_N_per_mm2", 275) >= 355 else "S275"
 
-            # Run checks on all verified sections, collect results
-            results = []
-            for sec in verified:
-                check = _check_section(sec=sec, **check_kwargs)
-                results.append({**check, "section": sec})
-
-            # Return lightest passing section + full list for optimisation
-            for r in results:
-                if r["pass"]:
-                    print(
-                        f"[section_retrieval] Live: selected {r['designation']}",
-                        flush=True,
-                    )
-                    return {
-                        **r,
-                        "source": "live",
-                        "all_sections": verified,
-                        "fallback_reason": None,
-                    }
-
-            fallback_reason = "No live candidate passed all checks — falling back to library"
-            print(f"[section_retrieval] {fallback_reason}", flush=True)
-
-            # Even if none passed, return best result with all_sections so frontend
-            # can run optimise (may go up from here)
-            if results:
-                return {
-                    **results[0],
-                    "source": "live",
-                    "all_sections": verified,
-                    "fallback_reason": fallback_reason,
-                }
-
-        except RuntimeError as exc:
-            fallback_reason = str(exc)
-            print(f"[section_retrieval] RuntimeError: {fallback_reason}", flush=True)
-        except Exception as exc:
-            fallback_reason = f"{type(exc).__name__}: {exc}"
-            print(f"[section_retrieval] Exception: {fallback_reason}", flush=True)
-
-    # Combined-library fallback (both grades, sorted by mass ascending)
-    print("[section_retrieval] Running cache fallback...", flush=True)
-    s275 = _load_grade_library("parts_library_S275.json")
-    s355 = _load_grade_library("parts_library_S355.json")
-    grade_sections = sorted(s275 + s355, key=lambda s: s.get("mass_kg_per_m", 9999))
-
-    if not grade_sections:
-        grade_sections = _load_sections()
-
-    cache_results = []
-    for sec in grade_sections:
-        result = _check_section(sec=sec, **check_kwargs)
-        cache_results.append({**result, "section": sec})
-        if result["pass"]:
-            print(
-                f"[section_retrieval] Cache: selected {result['designation']}",
-                flush=True,
-            )
-            return {
-                **result,
-                "source": "cache",
-                "all_sections": grade_sections,
-                "fallback_reason": fallback_reason,
-            }
+    try:
+        suppliers = find_suppliers(
+            designation=primary["designation"],
+            grade=section_grade,
+            mass_kg_per_m=primary["mass_kg_per_m"],
+        )
+    except Exception:
+        suppliers = dict(_UNKNOWN_SUPPLIERS)
 
     return {
-        "error": "No section passes checks in live retrieval or parts library cache.",
-        "pass": False,
-        "fallback_reason": fallback_reason,
-        "all_sections": grade_sections,
+        **primary,
+        "source": "cache",
+        "all_sections": sections,
+        "fallback_reason": None,
+        "constraints_applied": constraints,
+        "suppliers": suppliers,
     }

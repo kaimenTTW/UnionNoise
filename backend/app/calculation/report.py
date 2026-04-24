@@ -26,9 +26,19 @@ from reportlab.lib import colors
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.styles import ParagraphStyle
 from reportlab.lib.units import mm
+from reportlab.graphics.renderPDF import draw as rl_draw
+from reportlab.graphics.shapes import (
+    Drawing,
+    Group,
+    Line,
+    Rect,
+    Circle,
+    String,
+)
 from reportlab.platypus import (
     BaseDocTemplate,
     Frame,
+    KeepTogether,
     NextPageTemplate,
     PageBreak,
     PageTemplate,
@@ -37,6 +47,7 @@ from reportlab.platypus import (
     Table,
     TableStyle,
 )
+from reportlab.platypus.flowables import Flowable
 
 from .constants import APPLICABLE_CODES
 
@@ -199,6 +210,212 @@ def _results_table(rows: list[list], headers: list[str] | None = None) -> Table:
 
 def _sp(n: float = 4) -> Spacer:
     return Spacer(1, n * mm)
+
+
+# -- Base plate sketch ---------------------------------------------------------
+
+class _DrawingFlowable(Flowable):
+    """Thin wrapper so a ReportLab Drawing can sit in a Platypus story."""
+
+    def __init__(self, drawing: Drawing):
+        super().__init__()
+        self._d = drawing
+        self.width  = drawing.width
+        self.height = drawing.height
+
+    def draw(self):
+        rl_draw(self._d, self.canv, 0, 0)
+
+
+def draw_base_plate_sketch(conn: dict, section: dict) -> Drawing:
+    """
+    Return a dimensioned base plate plan view Drawing from connection and
+    section result dicts. Coordinates computed in mm, converted to ReportLab
+    points via ×mm exactly once at each drawing call. sf is dimensionless.
+    """
+    # ── Extract geometry (mm, raw) ────────────────────────────────────────────
+    bp = conn.get("base_plate", {}) or {}
+    bt = conn.get("bolt_tension", {}) or {}
+    be = conn.get("bolt_embedment", {}) or {}
+
+    plate_w  = float(bp.get("plate_width_mm")  or 400)
+    plate_h  = float(bp.get("plate_height_mm") or 500)
+    plate_t  = float(bp.get("plate_thickness_mm") or 20)
+    bolt_d   = float(bt.get("bolt_diameter_mm") or 20)
+    n_cols   = int(bt.get("n_tension") or 2)
+    Ds       = float(bt.get("Ds_mm") or 300)
+    edge     = 50.0
+    b_fl     = float(section.get("b_mm") or 150)
+    h_sec    = float(section.get("h_mm") or 300)
+    L_prov   = float(be.get("L_provided_mm") or 0)
+    desig    = section.get("designation", "--")
+    bolt_grade  = "8.8"
+    total_bolts = n_cols * 2
+
+    # p2: bolt pitch (mm). Defined here for use in both bolt circles and labels.
+    p2_mm = (plate_w - 2 * edge) / max(n_cols - 1, 1) if n_cols > 1 else 0.0
+
+    # ── Scale factor ──────────────────────────────────────────────────────────
+    sf = min(140.0 / plate_w, 160.0 / plate_h) * 0.85
+
+    # Canvas margins (mm, unscaled) — space for dim lines and title outside plate
+    margin_l = 25.0   # left  — Ds dim line
+    margin_r = 25.0   # right — plate height dim line
+    margin_b = 20.0   # bottom — plate width dim line
+    margin_t = 14.0   # top   — title
+
+    ann_strip = 36.0  # mm — annotation block height (3 lines × 10pt + padding)
+
+    pw_sc = plate_w * sf   # scaled plate width  [mm]
+    ph_sc = plate_h * sf   # scaled plate height [mm]
+
+    canvas_w = (margin_l + pw_sc + margin_r) * mm
+    canvas_h = (ann_strip + margin_b + ph_sc + margin_t) * mm
+
+    drw = Drawing(canvas_w, canvas_h)
+
+    ox = margin_l * mm                    # plate left edge [pt]
+    oy = (ann_strip + margin_b) * mm      # plate bottom edge [pt]
+    pw = pw_sc * mm
+    ph = ph_sc * mm
+    cx = ox + pw / 2
+    cy = oy + ph / 2
+
+    # ── Geometry sanity ───────────────────────────────────────────────────────
+    bolt_zone_h = plate_h - 2 * edge
+    bolt_zone_w = plate_w - 2 * edge
+
+    footprint_note = ""
+    drawn_h = h_sec
+    drawn_b = b_fl
+    if h_sec >= bolt_zone_h:
+        drawn_h = bolt_zone_h - 2 * edge
+        footprint_note = f"Section depth truncated for clarity (actual h={int(h_sec)}mm)"
+    if b_fl >= bolt_zone_w:
+        drawn_b = bolt_zone_w - 2 * edge
+
+    fw = drawn_b * sf * mm
+    fh = drawn_h * sf * mm
+
+    # ── 1. Base plate ─────────────────────────────────────────────────────────
+    drw.add(Rect(ox, oy, pw, ph,
+                 fillColor=colors.HexColor("#E8E8E8"),
+                 strokeColor=colors.HexColor("#000000"), strokeWidth=1.5))
+
+    # ── 2. Section footprint ──────────────────────────────────────────────────
+    drw.add(Rect(cx - fw / 2, cy - fh / 2, fw, fh,
+                 fillColor=colors.HexColor("#B0B0B0"),
+                 strokeColor=colors.HexColor("#000000"), strokeWidth=1.0))
+
+    # ── 3. Centrelines ────────────────────────────────────────────────────────
+    ext = 6 * mm
+    cl = dict(strokeColor=colors.HexColor("#666666"), strokeDashArray=[4, 3], strokeWidth=0.5)
+    drw.add(Line(ox - ext, cy, ox + pw + ext, cy, **cl))
+    drw.add(Line(cx, oy - ext, cx, oy + ph + ext, **cl))
+
+    # ── 4. Bolt circles ───────────────────────────────────────────────────────
+    br = min(max(bolt_d * sf * mm * 0.35, 4), 8)
+
+    if n_cols == 1:
+        x_cols = [cx]
+    elif n_cols == 2:
+        x_cols = [ox + edge * sf * mm, ox + (plate_w - edge) * sf * mm]
+    else:
+        x_cols = [ox + (edge + i * p2_mm) * sf * mm for i in range(n_cols)]
+
+    y_tension     = oy + (plate_h - edge) * sf * mm
+    y_compression = oy + edge * sf * mm
+
+    for xc in x_cols:
+        for yr in (y_tension, y_compression):
+            drw.add(Circle(xc, yr, br,
+                           fillColor=colors.HexColor("#1A1A1A"),
+                           strokeColor=None, strokeWidth=0))
+
+    # ── 5. Bolt pitch label inside plate (between bolt columns, if n_cols > 1) ─
+    if n_cols > 1 and len(x_cols) >= 2:
+        mid_pitch_x = (x_cols[0] + x_cols[1]) / 2
+        mid_pitch_y = (y_tension + y_compression) / 2
+        drw.add(String(mid_pitch_x, mid_pitch_y,
+                       f"p={int(round(p2_mm))}mm",
+                       fontName="Helvetica", fontSize=6,
+                       fillColor=colors.HexColor("#444444"), textAnchor="middle"))
+
+    # ── 6. Dimension lines ────────────────────────────────────────────────────
+    tick = 3 * mm
+
+    def _hdim(x1, x2, y_base, label, above=True, fs=7):
+        dy   = tick / 2
+        sign = 1 if above else -1
+        drw.add(Line(x1, y_base - dy, x1, y_base + dy, strokeColor=_BLACK, strokeWidth=0.5))
+        drw.add(Line(x2, y_base - dy, x2, y_base + dy, strokeColor=_BLACK, strokeWidth=0.5))
+        drw.add(Line(x1, y_base, x2, y_base, strokeColor=_BLACK, strokeWidth=0.5))
+        drw.add(String((x1 + x2) / 2, y_base + sign * (dy + 1.5 * mm), label,
+                       fontName="Helvetica", fontSize=fs, fillColor=_BLACK, textAnchor="middle"))
+
+    def _vdim(y1, y2, x_base, label, right=True, fs=7):
+        dx   = tick / 2
+        sign = 1 if right else -1
+        drw.add(Line(x_base - dx, y1, x_base + dx, y1, strokeColor=_BLACK, strokeWidth=0.5))
+        drw.add(Line(x_base - dx, y2, x_base + dx, y2, strokeColor=_BLACK, strokeWidth=0.5))
+        drw.add(Line(x_base, y1, x_base, y2, strokeColor=_BLACK, strokeWidth=0.5))
+        anchor = "start" if right else "end"
+        drw.add(String(x_base + sign * (dx + 1.5 * mm), (y1 + y2) / 2, label,
+                       fontName="Helvetica", fontSize=fs, fillColor=_BLACK, textAnchor=anchor))
+
+    dim_y_w = oy - 15 * mm          # plate width dim — 15mm below plate bottom
+    dim_xR  = ox + pw + 20 * mm     # plate height dim — 20mm right of plate
+    dim_xL  = ox - 20 * mm          # Ds dim — 20mm left of plate
+
+    # Plate width — below plate
+    _hdim(ox, ox + pw, dim_y_w, f"{int(plate_w)}mm", above=False)
+
+    # Plate height — right of plate
+    _vdim(oy, oy + ph, dim_xR, f"{int(plate_h)}mm", right=True)
+
+    # Ds (lever arm between bolt rows) — left of plate only
+    _vdim(y_compression, y_tension, dim_xL, f"Ds={int(Ds)}mm", right=False)
+
+    # ── 7. Title ──────────────────────────────────────────────────────────────
+    title_y = oy + ph + 8 * mm
+    drw.add(String(ox, title_y, "BASE PLATE DETAIL — PLAN VIEW",
+                   fontName="Helvetica-Bold", fontSize=9,
+                   fillColor=_BLACK, textAnchor="start"))
+
+    # ── 8. Annotation block ───────────────────────────────────────────────────
+    # Two columns separated by 60mm. Block sits in the ann_strip below margin_b.
+    # Top of block at (ann_strip - 4)mm from canvas bottom; lines at 10pt spacing.
+    line_h_pt = 10        # points between annotation lines
+    ann_top   = (ann_strip - 4) * mm   # y of first line
+    right_col = ox + 60 * mm          # x of right column
+
+    emb_label = f"{int(L_prov)}mm emb." if L_prov else "--"
+    left_lines = [
+        f"Plate: {int(plate_w)} x {int(plate_h)} x {int(plate_t)}mm, S275",
+        f"Bolts: {total_bolts} No. M{int(bolt_d)} Gr.{bolt_grade} @ {emb_label}",
+        f"Edge dist.: {int(edge)}mm ea.   Pitch: {int(round(p2_mm))}mm" if n_cols > 1
+        else f"Edge dist.: {int(edge)}mm ea.",
+    ]
+    right_lines = [
+        f"Ds = {int(Ds)}mm",
+        f"Bolt rows: 2   Cols: {n_cols}",
+        f"Section: {desig}",
+    ]
+    for i, txt in enumerate(left_lines):
+        drw.add(String(ox, ann_top - i * line_h_pt, txt,
+                       fontName="Helvetica", fontSize=7,
+                       fillColor=_BLACK, textAnchor="start"))
+    for i, txt in enumerate(right_lines):
+        drw.add(String(right_col, ann_top - i * line_h_pt, txt,
+                       fontName="Helvetica", fontSize=7,
+                       fillColor=_BLACK, textAnchor="start"))
+
+    if footprint_note:
+        drw.add(String(ox, ann_top - 3 * line_h_pt, f"* {footprint_note}",
+                       fontName="Helvetica-Oblique", fontSize=7,
+                       fillColor=colors.HexColor("#CC0000"), textAnchor="start"))
+
+    return drw
 
 
 # -- Page header / footer callbacks -------------------------------------------
@@ -473,7 +690,7 @@ def _section_steel(steel: dict, dp: dict) -> list:
     return story
 
 
-def _section_connection(conn: dict) -> list:
+def _section_connection(conn: dict, section: dict | None = None) -> list:
     story: list = []
     story.append(_section_title("Connection Design", "4"))
     story.append(_sp(3))
@@ -551,6 +768,26 @@ def _section_connection(conn: dict) -> list:
     story.append(_sp(2))
     story.append(_inputs_table(rows))
     story.append(_sp(3))
+
+    # Base plate sketch — vector graphic embedded before bolt tension derivation
+    if section:
+        try:
+            sketch = draw_base_plate_sketch(conn, section)
+            rule = Table([[""]], colWidths=[_USABLE_W])
+            rule.setStyle(TableStyle([("LINEABOVE", (0, 0), (-1, -1), 0.5, _GREY_MD)]))
+            story.append(KeepTogether([
+                rule,
+                _sp(2),
+                _DrawingFlowable(sketch),
+                _sp(2),
+                Table([[""]], colWidths=[_USABLE_W], style=TableStyle([
+                    ("LINEBELOW", (0, 0), (-1, -1), 0.5, _GREY_MD),
+                ])),
+                _sp(3),
+            ]))
+        except Exception as _sketch_exc:
+            import warnings
+            warnings.warn(f"Base plate sketch failed: {_sketch_exc}")
 
     Ft  = bt.get("Ft_per_bolt_kN", 0) or 0
     FTR = bt.get("FT_Rd_kN", 0) or 0
@@ -1273,7 +1510,7 @@ def generate_pdf(payload: dict) -> bytes:
         story.append(PageBreak())
 
     if calc.get("connection"):
-        story.extend(_section_connection(calc["connection"]))
+        story.extend(_section_connection(calc["connection"], calc.get("steel")))
         story.append(PageBreak())
 
     if calc.get("subframe"):

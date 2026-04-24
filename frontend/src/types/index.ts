@@ -161,6 +161,21 @@ export interface SectionChecks {
   pass: boolean
 }
 
+export interface SupplierContact {
+  name: string
+  website: string | null
+  phone: string | null
+  email: string | null
+  notes: string
+}
+
+export interface SupplierResult {
+  suppliers: SupplierContact[]
+  search_summary: string
+  grade_note: string | null
+  suppliers_found: boolean
+}
+
 export interface SelectionResult {
   section: SteelSection
   checks: SectionChecks
@@ -173,6 +188,7 @@ export interface SelectionResult {
   w_kN_per_m: number
   L_mm: number
   Lcr_mm: number
+  suppliers?: SupplierResult
 }
 
 // ─── Optimise result (from POST /api/optimize-section) ───────────────────────

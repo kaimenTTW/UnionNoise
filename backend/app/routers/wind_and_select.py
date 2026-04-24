@@ -1,7 +1,7 @@
 """
 POST /api/wind-and-select
 
-Phase 1 endpoint — runs wind calculation and AI section search together.
+Phase 1 endpoint — runs wind calculation and library section selection together.
 Called by Step 3 on first "Run Calculations" click (no confirmed section).
 
 Returns:
@@ -15,7 +15,7 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
 from app.calculation.wind import compute_design_pressure
-from app.services.section_retrieval import select_section
+from app.services.section_retrieval import parse_remarks, select_section
 
 router = APIRouter(prefix="/api", tags=["wind-and-select"])
 
@@ -35,10 +35,9 @@ class WindAndSelectRequest(BaseModel):
 
 
 @router.post("/wind-and-select")
-async def wind_and_select(body: WindAndSelectRequest) -> dict:
+def wind_and_select(body: WindAndSelectRequest) -> dict:
     """
-    Phase 1: wind calculation + Claude web search section selection.
-    Web search always runs here (use_retrieval=True).
+    Phase 1: wind calculation + library section selection.
     Phase 2 (foundation/connection/subframe/lifting) runs separately via /api/calculate
     once the engineer confirms the section.
     """
@@ -60,8 +59,10 @@ async def wind_and_select(body: WindAndSelectRequest) -> dict:
     V_Ed_kN = 1.5 * w_kN_per_m * body.post_length
     Lcr_mm = body.subframe_spacing * 1000
 
+    constraints = parse_remarks(body.remarks) if body.remarks.strip() else {}
+
     try:
-        section_raw = await select_section(
+        section_raw = select_section(
             M_Ed_kNm=M_Ed_kNm,
             V_Ed_kN=V_Ed_kN,
             w_kN_per_m=w_kN_per_m,
@@ -69,8 +70,7 @@ async def wind_and_select(body: WindAndSelectRequest) -> dict:
             Lcr_mm=Lcr_mm,
             post_length_m=body.post_length,
             deflection_limit_n=body.deflection_limit_n,
-            remarks=body.remarks,
-            use_retrieval=True,
+            constraints=constraints,
         )
     except Exception as exc:
         raise HTTPException(status_code=422, detail=f"Section selection failed: {exc}") from exc

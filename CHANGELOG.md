@@ -1,5 +1,86 @@
 # CHANGELOG
 
+## [0.29.2] — 2026-04-24
+### Fixed
+- `report.py`: `draw_base_plate_sketch()` annotation and dimension formatting. Annotation block expanded to 36mm height with 10pt line spacing — eliminates text overlap. Left column: plate/bolt/edge spec on three lines. Right column: Ds, bolt rows/cols, section designation — 60mm gap between columns. Dimension lines reorganised: Ds on left (20mm offset), plate height on right (20mm offset), plate width below (15mm offset). Right-side edge distance label removed — stated in annotation block instead. Bolt pitch label moved inside plate between bolt column centres. Title repositioned 8mm above plate top at 9pt Helvetica-Bold. All dimension labels 7pt; bolt pitch label inside plate 6pt grey. Truncation note in 7pt red italic when applicable.
+
+---
+
+## [0.29.1] — 2026-04-24
+### Fixed
+- `report.py`: `draw_base_plate_sketch()` geometry corrected. Section footprint rectangle was overlapping bolt circles because `h_section` (398mm for a 406×140×39 UB) was close to `plate_height - 2×edge` (400mm), leaving only 1mm clearance. Fixed: geometry sanity check added — if section depth fills the bolt zone (`h_sec >= plate_h - 2×edge`), footprint is drawn truncated with an italic amber note; dimension annotations still show actual values. Bolt positions now computed strictly from plate edges, independent of footprint. `scale_factor` now includes a 0.85 headroom factor so dimension lines never crowd the plate boundary. Bolt circle radius clamped to [4, 8]pt (`bolt_d × sf × 0.35`). Dimension lines repositioned to 15mm outside plate boundary (was 6mm — too tight). `scale_factor` is applied exactly once to each coordinate; ×mm conversion to ReportLab points is a separate step.
+
+---
+
+## [0.29.0] — 2026-04-24
+### Added
+- `report.py`: `draw_base_plate_sketch()` — generates a dimensioned base plate plan view sketch using ReportLab graphics. Draws plate outline (light grey fill), UB section footprint (mid grey, centred on plate), bolt circles (dark filled, two rows × n_cols columns), dashed centrelines, six dimension annotations with tick marks (plate width/height, edge distance horizontal/vertical, bolt pitch p2, lever arm Ds), and annotation block with plate spec, bolt spec, and embedment. Embedded in connection section of PDF before section 4.3 Bolt Tension, wrapped in a `KeepTogether` block between thin horizontal rules. Derived entirely from `conn` and `section` result dicts — no additional inputs required. Fails gracefully (warning only) if any key is missing; report generation continues without the sketch.
+- `report.py`: `_DrawingFlowable` — thin `Flowable` wrapper so a ReportLab `Drawing` can sit in a Platypus story.
+
+---
+
+## [0.28.4] — 2026-04-24
+### Fixed
+- `section_retrieval.py`: `find_suppliers()` JSON extraction fixed. Claude returns valid JSON inside a ` ```json ` fence preceded by prose. Previous extraction looked for raw `{` character and failed when prose appeared first. New extraction handles ` ```json ` fence, plain ` ``` ` fence, and raw `{` fallback in that priority order. All supplier data was being retrieved correctly — only the extraction was failing.
+
+---
+
+## [0.28.3] — 2026-04-24
+### Fixed
+- `section_retrieval.py`: `find_suppliers()` — added diagnostic logging for all response blocks, `stop_reason`, and JSON parsing. Added multi-turn loop (max 8 turns) for `stop_reason="tool_use"` — previous single-call implementation never completed tool execution when Claude returned `tool_use` before `end_turn`. Timeout increased from 20s to 45s for multi-step search+fetch tool use.
+
+---
+
+## [0.28.2] — 2026-04-24
+### Fixed
+- `section_retrieval.py`: `find_suppliers()` now enables both `web_search_20250305` and `web_fetch_20250910` tools. Claude searches for suppliers then visits each supplier contact page to extract phone and email. Previous implementation used `web_search` only — contact details are not present in search snippets so results were always empty. `max_tokens` increased to 2048 to accommodate multi-step tool use. Response extraction updated to take the last text block from multi-tool response content (intermediate blocks are tool reasoning).
+
+---
+
+## [0.28.1] — 2026-04-24
+### Fixed
+- `Step3.tsx`: Removed duplicate "Additional Considerations" `Field` label — panel title already provides the heading; inner label changed to "Engineer remarks".
+- `Step3.tsx`: Removed unused `maxUR` variable in `OptimisedCard`.
+### Added
+- `Step3.tsx`: AI badge and inline description next to "Engineer remarks" textarea — indicates Claude parses the field to extract grade preference, condition factor, and site flags.
+- `Step3.tsx`: `Phase1Progress` component — animated three-step progress list shown while Phase 1 POST is in flight (wind load → section library scan → finding suppliers). Each step auto-advances on a fixed timer; ticked green when passed, spinning when current, dimmed when pending.
+
+---
+
+## [0.28.0] — 2026-04-24
+### Added
+- `section_retrieval.py`: `find_suppliers()` — calls Claude `claude-sonnet-4-6` with `web_search_20250305` tool to find Singapore structural steel suppliers for the selected grade. Returns supplier list with name, website, phone, email, and notes. Up to 5 suppliers. Non-blocking, 20s timeout, returns `unknown_result` on any failure. JSON fence stripping and shape validation (per-entry name check, list clamp) applied.
+- `Step3.tsx`: `SupplierPanel` component — shown below section card after Phase 1. Lists Singapore suppliers with clickable website links, phone, email, and notes. AI disclaimer shown below the list. "Generate Inquiry" placeholder button (disabled, coming soon). Loading state shows spinner with "Finding suppliers…".
+- `types/index.ts`: `SupplierContact`, `SupplierResult` interfaces added. `suppliers` optional field added to `SelectionResult`.
+### Removed
+- `section_retrieval.py`: `check_availability()` — replaced by `find_suppliers()`. Real-time stock confirmation via web search is unreliable for the Singapore steel market (inventory not published online); supplier shortlisting is stable information web search can answer reliably.
+- `Step3.tsx`: `AvailabilityBadge` — replaced by `SupplierPanel`. Availability alternative logic removed.
+- `types/index.ts`: `AvailabilitySupplier`, `AvailabilityResult`, `AvailabilityAlternative` interfaces removed.
+### Notes
+- Supplier contact details are stable information web search can answer reliably — unlike real-time stock which is not public.
+- Engineer or procurement team contacts supplier directly to confirm availability of specific section.
+- "Generate Inquiry" button placeholder sets up next session — pre-filled WhatsApp/email message generation from supplier list.
+- Supplier search does not affect section selection or any UR values — engineering outputs are unchanged.
+
+---
+
+## [0.27.0] — 2026-04-24
+### Changed
+- `section_retrieval.py`: Web search removed from section selection entirely. Library iteration is now the primary and only path. `select_section()` is now synchronous. Combined S275+S355 library used by default; grade-filtered when constraints specify. `source="cache"` always.
+- `routers/select_section.py`: `await` removed from `select_section()` call. Remarks parsed via `parse_remarks()` before selection. `constraints_applied` added to response. Endpoint is now synchronous.
+- `routers/wind_and_select.py`: `await` and `use_retrieval` removed. Remarks parsed via `parse_remarks()` before selection. Endpoint is now synchronous.
+### Added
+- `section_retrieval.py`: `parse_remarks()` — calls Claude `claude-sonnet-4-6` with structured output prompt to extract design constraints from free-text remarks. Returns `grade`, `condition_factor`, LTA/temporary/coastal flags, `notes_for_advisor`. Non-blocking — returns empty constraints on any failure.
+- `section_retrieval.py`: Grade filter and `condition_factor` wired into library iteration from parsed constraints.
+- `steel.py`: `condition_factor` parameter added to `_check_section()` (default 1.0). Multiplies `Wpl_y_cm3` before `Mpl` computation for used/reconditioned sections. Included in return dict.
+### Notes
+- Phase 1 is now faster — no 2–5 second web search timeout on every run.
+- Remarks box now has practical effect: grade filter applied immediately, condition factor reduces `Wpl` for used sections.
+- Engineering properties remain library-sourced — correct and reliable.
+- All existing P105 T2 assertions unchanged — `condition_factor` defaults to 1.0, combined library contains both grades as before.
+
+---
+
 ## [0.26.0] — 2026-04-24
 ### Added
 - `backend/app/data/bolt_library.json`: ISO 898-1 bolt mechanical properties for M16, M20, M24, M30 Grade 8.8. Stores `fub`, `fyb`, threaded stress area (`As_threaded`) and nominal shank area (`As_nominal`) per diameter.

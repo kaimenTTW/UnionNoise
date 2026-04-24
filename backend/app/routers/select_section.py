@@ -1,8 +1,9 @@
 """
 POST /api/select-section
 
-AI-assisted steel section retrieval. Computes design demand from wind + geometry,
-then calls the section retrieval service (Claude web search + library fallback).
+Steel section retrieval via library iteration. Computes design demand from wind +
+geometry, parses optional engineer remarks for constraints, then selects the
+lightest passing UB section from the parts library.
 """
 
 from __future__ import annotations
@@ -11,7 +12,7 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
 from app.calculation.wind import compute_design_pressure
-from app.services.section_retrieval import select_section
+from app.services.section_retrieval import parse_remarks, select_section
 
 router = APIRouter(prefix="/api", tags=["select-section"])
 
@@ -37,8 +38,9 @@ class SelectSectionRequest(BaseModel):
 class SelectSectionResponse(BaseModel):
     designation: str | None = None
     mass_kg_per_m: float | None = None
-    source: str | None = None      # "live" | "cache"
+    source: str | None = None
     fallback_reason: str | None = None
+    constraints_applied: dict | None = None
     M_Ed_kNm: float | None = None
     V_Ed_kN: float | None = None
     w_kN_per_m: float | None = None
@@ -56,10 +58,10 @@ class SelectSectionResponse(BaseModel):
 
 
 @router.post("/select-section", response_model=SelectSectionResponse)
-async def select_section_endpoint(body: SelectSectionRequest) -> SelectSectionResponse:
+def select_section_endpoint(body: SelectSectionRequest) -> SelectSectionResponse:
     """
-    Compute design demand from wind inputs, then select the lightest passing UB section
-    via Claude web search (fallback: grade-specific parts library cache).
+    Compute design demand from wind inputs, parse remarks for constraints, then
+    select the lightest passing UB section from the parts library.
     """
     try:
         wind = compute_design_pressure(
@@ -78,8 +80,10 @@ async def select_section_endpoint(body: SelectSectionRequest) -> SelectSectionRe
     V_Ed_kN = 1.5 * w_kN_per_m * body.post_length
     Lcr_mm = body.subframe_spacing * 1000
 
+    constraints = parse_remarks(body.remarks) if body.remarks.strip() else {}
+
     try:
-        result = await select_section(
+        result = select_section(
             M_Ed_kNm=M_Ed_kNm,
             V_Ed_kN=V_Ed_kN,
             w_kN_per_m=w_kN_per_m,
@@ -87,7 +91,7 @@ async def select_section_endpoint(body: SelectSectionRequest) -> SelectSectionRe
             Lcr_mm=Lcr_mm,
             post_length_m=body.post_length,
             deflection_limit_n=body.deflection_limit_n,
-            remarks=body.remarks,
+            constraints=constraints,
         )
     except Exception as exc:
         raise HTTPException(status_code=422, detail=f"Section selection failed: {exc}") from exc

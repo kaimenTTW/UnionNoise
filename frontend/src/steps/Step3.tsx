@@ -14,6 +14,7 @@ import type {
   SelectionResult,
   SteelSection,
   SubframeCalcResult,
+  SupplierResult,
   WindCalcResult,
 } from '../types'
 
@@ -1078,12 +1079,88 @@ function LiftingPanel({ lift }: { lift: LiftingCalcResult }) {
 
 // ─── Section selection cards ──────────────────────────────────────────────────
 
+function SupplierPanel({
+  suppliers,
+  designation,
+  grade,
+  isLoading,
+}: {
+  suppliers: SupplierResult | undefined
+  designation: string
+  grade: string
+  isLoading: boolean
+}) {
+  if (isLoading) {
+    return (
+      <div className="flex items-center gap-2 text-xs text-muted/70 pt-1">
+        <span className="inline-block w-3 h-3 rounded-full border-2 border-muted/40 border-t-transparent animate-spin" />
+        Finding suppliers…
+      </div>
+    )
+  }
+  if (!suppliers) return null
+
+  if (!suppliers.suppliers_found) {
+    return (
+      <p className="text-xs text-muted/60 pt-1">
+        No suppliers found — search manually or contact your preferred stockist.
+      </p>
+    )
+  }
+
+  return (
+    <div className="rounded border border-border bg-surface/30 p-3 space-y-2 mt-1">
+      <p className="text-xs font-semibold uppercase tracking-widest text-muted">
+        Singapore Suppliers — {grade}
+      </p>
+      <div className="space-y-2">
+        {suppliers.suppliers.map((s, i) => (
+          <div key={i} className="space-y-0.5">
+            <div className="flex flex-wrap items-baseline gap-x-3 gap-y-0.5">
+              {s.website ? (
+                <a
+                  href={s.website}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-xs font-semibold text-accent hover:underline"
+                >
+                  {s.name}
+                </a>
+              ) : (
+                <span className="text-xs font-semibold text-white">{s.name}</span>
+              )}
+              {s.phone && <span className="text-xs text-muted">{s.phone}</span>}
+              {s.email && <span className="text-xs text-muted">{s.email}</span>}
+            </div>
+            {s.notes && <p className="text-[11px] text-muted/60">{s.notes}</p>}
+          </div>
+        ))}
+      </div>
+      {suppliers.grade_note && (
+        <p className="text-[11px] text-muted/60 border-t border-border/30 pt-2">{suppliers.grade_note}</p>
+      )}
+      <p className="text-[11px] text-muted/50 italic border-t border-border/30 pt-2">
+        Contact supplier to confirm availability of {designation}. Details sourced by AI search — verify before use.
+      </p>
+      <button
+        type="button"
+        disabled
+        title="Will generate a pre-filled WhatsApp/email inquiry for the selected section"
+        className="mt-1 px-3 py-1.5 text-xs font-medium border border-border rounded text-muted opacity-40 cursor-not-allowed"
+      >
+        Generate Inquiry (coming soon)
+      </button>
+    </div>
+  )
+}
+
 function SectionCard({
   result,
   onOptimise,
   onConfirmAndContinue,
   isOptimising,
   isPhase2Loading,
+  isPhase1Loading,
   canRun,
 }: {
   result: SelectionResult
@@ -1091,9 +1168,10 @@ function SectionCard({
   onConfirmAndContinue: () => void
   isOptimising: boolean
   isPhase2Loading: boolean
+  isPhase1Loading: boolean
   canRun: boolean
 }) {
-  const { section, checks, source, fallback_reason } = result
+  const { section, checks, source, fallback_reason, suppliers } = result
   const allPass = checks.pass
   const gradeLabel = section.fy_N_per_mm2 >= 355 ? 'S355' : 'S275'
   const sourceLabel =
@@ -1113,6 +1191,12 @@ function SectionCard({
       {fallback_reason && (
         <p className="text-xs text-warning/80">{fallback_reason}</p>
       )}
+      <SupplierPanel
+        suppliers={suppliers}
+        designation={section.designation}
+        grade={gradeLabel}
+        isLoading={isPhase1Loading}
+      />
       <div className="grid grid-cols-3 gap-2 text-xs">
         <div>
           <p className="text-muted mb-0.5">UR moment</p>
@@ -1176,7 +1260,6 @@ function OptimisedCard({
   isPhase2Loading: boolean
 }) {
   const { selected_section: sec, checks, optimisation_case, iterations, optimised } = result
-  const maxUR = Math.max(checks.UR_moment, checks.UR_deflection, checks.UR_shear)
   const gradeLabel = (sec.fy_N_per_mm2 ?? 275) >= 355 ? 'S355' : 'S275'
 
   return (
@@ -1258,6 +1341,61 @@ function OverallBanner({ results }: { results: CalculationResults }) {
       <span className="font-semibold text-sm">
         {allPass ? 'All checks pass' : `${failCount} check${failCount > 1 ? 's' : ''} failed`}
       </span>
+    </div>
+  )
+}
+
+// ─── Phase 1 progress indicator ──────────────────────────────────────────────
+// Animates through three steps while the /api/wind-and-select POST is in flight.
+// Each step auto-advances on a fixed timer so the user sees visible progress
+// even though the real work is opaque on the backend.
+
+const PHASE1_STEPS = [
+  { label: 'Computing wind load', detail: 'EC1-1-4 terrain roughness + peak velocity pressure' },
+  { label: 'Scanning section library', detail: 'Iterating S275 + S355 UB catalogue by mass ascending' },
+  { label: 'Finding suppliers', detail: 'Claude searching Singapore structural steel stockists' },
+]
+
+function Phase1Progress({ active }: { active: boolean }) {
+  const [step, setStep] = useState(0)
+
+  useEffect(() => {
+    if (!active) { setStep(0); return }
+    setStep(0)
+    const t1 = setTimeout(() => setStep(1), 800)
+    const t2 = setTimeout(() => setStep(2), 2200)
+    return () => { clearTimeout(t1); clearTimeout(t2) }
+  }, [active])
+
+  if (!active) return null
+
+  return (
+    <div className="rounded border border-border bg-surface/40 px-4 py-3 space-y-2">
+      {PHASE1_STEPS.map((s, i) => {
+        const done = i < step
+        const current = i === step
+        return (
+          <div key={i} className="flex items-start gap-3">
+            <div className="mt-0.5 w-4 shrink-0 flex justify-center">
+              {done ? (
+                <span className="text-green-400 text-xs font-bold">✓</span>
+              ) : current ? (
+                <span className="inline-block w-3 h-3 rounded-full border-2 border-accent border-t-transparent animate-spin" />
+              ) : (
+                <span className="inline-block w-2 h-2 rounded-full bg-border mt-0.5" />
+              )}
+            </div>
+            <div>
+              <p className={`text-xs font-medium leading-tight ${done ? 'text-green-400' : current ? 'text-white' : 'text-muted/50'}`}>
+                {s.label}
+              </p>
+              {current && (
+                <p className="text-[11px] text-muted/70 mt-0.5">{s.detail}</p>
+              )}
+            </div>
+          </div>
+        )
+      })}
     </div>
   )
 }
@@ -1518,6 +1656,7 @@ export default function Step3() {
       w_kN_per_m: (raw.w_kN_per_m as number) ?? 0,
       L_mm: (raw.L_mm as number) ?? L_mm,
       Lcr_mm: (raw.Lcr_mm as number) ?? Lcr_mm,
+      suppliers: raw.suppliers as SupplierResult | undefined,
     }
   }
 
@@ -2073,11 +2212,14 @@ export default function Step3() {
           {/* ── Additional Considerations ── */}
           <div className="panel space-y-2">
             <p className="text-xs font-semibold uppercase tracking-widest text-muted">Additional Considerations</p>
-            <Field
-              label="Additional Considerations"
-              hint="Optional. Any site-specific conditions, PE instructions, or project requirements that should influence section selection."
-              span
-            >
+            <div className="col-span-2 space-y-1">
+              <div className="flex items-baseline gap-2">
+                <label className="field-label mb-0">Engineer remarks</label>
+                <span className="inline-flex items-center gap-1 px-1.5 py-px rounded text-[10px] font-medium bg-accent/10 text-accent border border-accent/20 leading-none">
+                  AI
+                </span>
+                <span className="text-[10px] text-muted/60">Parsed by Claude to extract grade preference, condition, and site flags</span>
+              </div>
               <textarea
                 rows={3}
                 placeholder="e.g. Limited headroom — prefer shallower sections. Adjacent to sensitive receiver — minimise deflection."
@@ -2085,7 +2227,8 @@ export default function Step3() {
                 value={dp.remarks ?? ''}
                 onChange={(e) => set({ remarks: e.target.value })}
               />
-            </Field>
+              <p className="text-xs text-muted/60">Optional. Any site-specific conditions, PE instructions, or project requirements that should influence section selection.</p>
+            </div>
           </div>
 
           {/* ── Section Selection ── */}
@@ -2111,6 +2254,8 @@ export default function Step3() {
                 </button>
               </div>
             )}
+
+            <Phase1Progress active={phase1Loading} />
 
             {/* Run Calculations button — shown when no Phase 1 result, or when confirmed section (re-run) */}
             {(!phase1Complete || confirmed_section != null) && (
@@ -2149,6 +2294,7 @@ export default function Step3() {
                 onConfirmAndContinue={() => handleRunPhase2(phase1_result!.section_result.section)}
                 isOptimising={isOptimising}
                 isPhase2Loading={phase2Loading}
+                isPhase1Loading={phase1Loading}
                 canRun={canRun}
               />
             )}
