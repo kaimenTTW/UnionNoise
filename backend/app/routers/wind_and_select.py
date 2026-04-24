@@ -26,6 +26,7 @@ class WindAndSelectRequest(BaseModel):
     vb: float | None = Field(None, gt=0, description="Basic wind velocity override [m/s]. Omit for SG NA 20 m/s.")
     return_period: int = Field(50, ge=1, description="Return period [years].")
     cp_net: float = Field(1.2, gt=0, description="Net pressure coefficient cp,net.")
+    terrain_category: str = Field('II', description="EC1-1-4 Table 4.1 terrain category: '0', 'I', 'II', 'III', 'IV'.")
     post_spacing: float = Field(..., gt=0, description="Post spacing (tributary width) [m].")
     subframe_spacing: float = Field(..., gt=0, description="Subframe spacing = Lcr [m].")
     post_length: float = Field(..., gt=0, description="Post length above foundation [m].")
@@ -48,6 +49,7 @@ async def wind_and_select(body: WindAndSelectRequest) -> dict:
             vb=body.vb,
             return_period=body.return_period,
             cp_net=body.cp_net,
+            terrain_category=body.terrain_category,
         )
     except Exception as exc:
         raise HTTPException(status_code=422, detail=f"Wind calculation failed: {exc}") from exc

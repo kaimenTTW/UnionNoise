@@ -121,6 +121,8 @@ export interface DesignParameters {
   cu_kPa: number                    // default 0
   /** Net pressure coefficient cp,net. Resolved numeric value sent to API. */
   cp_net: number                    // default 1.2
+  /** Terrain category per EC1-1-4 Table 4.1. Drives z0 and zmin in wind calculation. */
+  terrain_category: '0' | 'I' | 'II' | 'III' | 'IV'  // default 'II'
   /** Panel solidity mode — drives cp,net lookup from EC1 Table 7.9. */
   cp_net_mode: 'porous' | 'solid'  // default 'porous'
   /** Full run length of the barrier (m). Required for solid panel l/h derivation. */
@@ -197,6 +199,10 @@ export interface Phase1Result {
 
 export interface WindCalcResult {
   ze_m: number
+  ze_effective_m?: number
+  z0_m?: number
+  zmin_m?: number
+  terrain_category?: string
   cr: number
   vm_m_per_s: number
   Iv: number

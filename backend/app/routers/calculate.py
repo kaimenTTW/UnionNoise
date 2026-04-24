@@ -89,6 +89,12 @@ class CalculateRequest(BaseModel):
         description="Net pressure coefficient cp,net. Default 1.2 (porous TNCB panels, EC1 Table 7.9)."
     )
 
+    # Wind — terrain category
+    terrain_category: str = Field(
+        'II',
+        description="EC1-1-4 Table 4.1 terrain category: '0', 'I', 'II', 'III', 'IV'. Default 'II' (suburban/roadside)."
+    )
+
     # Peak velocity pressure — passed from Phase 1 result so G clamp uses consistent qp.
     # When None, falls back to computing qp from structure_height.
     qp_kPa: float | None = Field(
@@ -122,6 +128,10 @@ class CalculateRequest(BaseModel):
 
 class WindResult(BaseModel):
     ze_m: float
+    ze_effective_m: float
+    z0_m: float
+    zmin_m: float
+    terrain_category: str
     cr: float
     vm_m_per_s: float
     Iv: float
@@ -137,6 +147,7 @@ class WindResult(BaseModel):
     cp_net: float
     shelter_factor: float
     design_pressure_kPa: float
+    lh_ratio: float | None = None
 
 
 class SteelResult(BaseModel):
@@ -283,6 +294,7 @@ async def calculate(body: CalculateRequest) -> CalculateResponse:
             vb=body.vb,
             return_period=body.return_period,
             cp_net=body.cp_net,
+            terrain_category=body.terrain_category,
         )
     except Exception as exc:
         raise HTTPException(status_code=422, detail=f"Wind calculation failed: {exc}") from exc

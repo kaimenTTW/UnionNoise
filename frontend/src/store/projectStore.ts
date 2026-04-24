@@ -88,6 +88,7 @@ const defaultDesignParameters: DesignParameters = {
   gamma_s: 19,
   cohesion_ck: 5,
   cu_kPa: 0,
+  terrain_category: 'II',
   cp_net: 1.2,
   cp_net_mode: 'porous',
   barrier_length_m: null,

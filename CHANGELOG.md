@@ -1,5 +1,36 @@
 # CHANGELOG
 
+## [0.26.0] — 2026-04-24
+### Added
+- `backend/app/data/bolt_library.json`: ISO 898-1 bolt mechanical properties for M16, M20, M24, M30 Grade 8.8. Stores `fub`, `fyb`, threaded stress area (`As_threaded`) and nominal shank area (`As_nominal`) per diameter.
+- `connection.py`: `BOLT_DATA` lookup dict loaded from `bolt_library.json` at module init. Keyed by `(diameter_mm, grade)`.
+### Fixed
+- `connection.py` dynamic path: `FT_Rd` and `Fv_Rd` now use threaded stress area (`As_threaded`) from `bolt_library.json` per EC3-1-8 Table 3.4. Previous nominal area overstated `FT_Rd` by up to 28% (M24: 452→353 mm²). `bolt_As_type="threaded"` added to dynamic path return dict.
+- `connection.py` config path: `As_nominal_mm2` now looked up from `bolt_library.json` instead of computed inline. Preserves P105 T2 Run B exactly — M24 nominal `As=452 mm²`, `FT_Rd=260.35 kN`, `UR=0.371`. Note: PE calc used `π/4·d²=452.39 mm²` yielding `FT_Rd=260.58 kN`, `UR=0.370` — 0.22 kN rounding difference from ISO 898-1 tabulated value, immaterial. `bolt_As_type="nominal"` added to config path return dict.
+- `connection_library.json`: `_Ds_note` corrected for `T2_M20_4bolt` (175→250 mm) and `T1_M20_6bolt` (265→430 mm) per confirmed rule `Ds = plate_height − 100`.
+### Notes
+- Dynamic path now produces higher `UR_tension` than before for same load — this is correct; previous values were unconservative.
+- Config path P105 T2 Run B assertions updated to ISO 898-1 tabulated values — all checks pass.
+- `Ds` correction in `connection_library.json` is note-only — these configs are flagged unvalidated and not used by the dynamic path.
+
+---
+
+## [0.25.0] — 2026-04-24
+### Added
+- `wind.py`: Terrain category parameter added to `compute_design_pressure()` and `compute_qp()`. `TERRAIN_Z0` and `TERRAIN_ZMIN` lookup dicts for all five EC1-1-4 categories (0, I, II, III, IV). zmin check applied: `ze_effective = max(ze, zmin)` per EC1 Cl 4.3.2 — prevents underestimating cr for low structures in rough terrain. `terrain_category`, `z0_m`, `zmin_m`, `ze_effective_m` added to return dict.
+- `Step3.tsx`: Terrain category dropdown added to Wind group (full-width, spans both columns). Five options with z0 values shown. Default Category II. Clears Phase 1 on change.
+- `Step3.tsx` `buildWindRows`: Terrain category and reference height rows added to wind derivation panel. Roughness factor and turbulence intensity expressions now use actual z0 from response instead of hardcoded 0.05.
+- `types/index.ts`: `terrain_category` added to `DesignParameters`. `ze_effective_m`, `z0_m`, `zmin_m`, `terrain_category` added as optional fields to `WindCalcResult`.
+- `projectStore.ts`: `terrain_category: 'II'` added to initial state.
+- `routers/calculate.py`: `terrain_category` field added to `CalculateRequest` and `WindResult`. Passed to `compute_design_pressure()`.
+- `routers/wind_and_select.py`: `terrain_category` field added to `WindAndSelectRequest`. Passed to `compute_design_pressure()`.
+### Notes
+- All existing P105 T2 assertions unchanged — Category II default, ze=12.7m > zmin=2.0m, qp=598.48 N/m² ✓
+- Category I at the same ze gives ~45% higher cr than Category II — significant impact on qp and all downstream checks.
+- zmin clamp verified: Category IV, ze=8m < zmin=10m → ze_effective=10.0m ✓
+
+---
+
 ## [0.24.4] — 2026-04-24
 ### Fixed
 - **PDF report `--` placeholder audit** (`report.py`, `connection.py`, `routers/calculate.py`): Resolved all spurious `--` values across the PDF report in a single pass.

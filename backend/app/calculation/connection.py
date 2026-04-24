@@ -29,6 +29,13 @@ from pathlib import Path
 from .constants import BOLT_STRESS_AREA, CONCRETE, STEEL
 
 _CONNECTION_LIBRARY_PATH = Path(__file__).parent.parent / "data" / "connection_library.json"
+_BOLT_LIBRARY_PATH = Path(__file__).parent.parent / "data" / "bolt_library.json"
+
+with _BOLT_LIBRARY_PATH.open() as _f:
+    BOLT_DATA: dict[tuple[int, str], dict] = {
+        (b["diameter_mm"], b["grade"]): b
+        for b in json.load(_f)
+    }
 
 
 @lru_cache(maxsize=1)
@@ -54,7 +61,6 @@ def _derive_connection(
 
     Returns a dict with plate/bolt geometry and embedment, or {"error": ..., "pass": False}.
     """
-    fub = 800.0
     gamma_M2 = STEEL["gamma_M2"]
     gamma_c = CONCRETE["gamma_c"]
 
@@ -72,10 +78,11 @@ def _derive_connection(
 
     # Bolt diameter iteration — M16, M20, M24, M30
     for d in (16, 20, 24, 30):
-        As_nom = math.pi / 4 * d ** 2
-        FT_Rd_kN = 0.9 * fub * As_nom / gamma_M2 / 1000
-        As_shear = BOLT_STRESS_AREA.get(d, As_nom)
-        Fv_Rd_kN = 0.6 * fub * As_shear / gamma_M2 / 1000
+        bolt = BOLT_DATA[(d, "8.8")]
+        fub = bolt["fub_N_per_mm2"]
+        As = bolt["As_threaded_mm2"]
+        FT_Rd_kN = 0.9 * fub * As / gamma_M2 / 1000
+        Fv_Rd_kN = 0.6 * fub * As / gamma_M2 / 1000
 
         n_cols = max(2, math.floor((plate_width_mm - 2 * edge) / (2.4 * d)))
         n_tension = n_cols
@@ -122,6 +129,9 @@ def _derive_connection(
             "Ds_mm": Ds_mm,
             "bolt_diameter_mm": float(d),
             "bolt_grade": "8.8",
+            "bolt_As_mm2": As,
+            "bolt_As_type": "threaded",
+            "bolt_fub_N_per_mm2": fub,
             "n_tension": n_tension,
             "n_shear": n_shear,
             "embedment_mm": embedment_mm,
@@ -170,7 +180,6 @@ def compute_connection(
     Returns:
         Dict with all seven check results and all_checks_pass flag.
     """
-    fub = 800.0          # N/mm² — Grade 8.8
     gamma_M2 = STEEL["gamma_M2"]   # 1.25
 
     # ── Geometry source: dynamic derivation or explicit config ────────────────
@@ -213,24 +222,32 @@ def compute_connection(
         weld_length_override = config.get("weld_length_mm")
         n_clamps_provided = config.get("n_clamps_per_post", 5)
 
-    # Nominal (gross) shank area — used for FT_Rd per confirmed P105 T2 PE methodology
-    As_nominal_mm2 = math.pi / 4 * diameter_mm ** 2
-
-    # Threaded (net) stress area — used for bolt shear only
-    As_mm2 = BOLT_STRESS_AREA.get(int(diameter_mm), As_nominal_mm2)
+    bolt_data = BOLT_DATA[(int(diameter_mm), "8.8")]
+    if derived:
+        # Threaded area already selected in _derive_connection; read from geo for consistency
+        As_nominal_mm2 = bolt_data["As_nominal_mm2"]
+        As_mm2 = geo["bolt_As_mm2"]   # threaded
+        fub = geo["bolt_fub_N_per_mm2"]
+    else:
+        # Config path: nominal area per P105 T2 PE methodology (Han Engineering 8/6/2023)
+        As_nominal_mm2 = bolt_data["As_nominal_mm2"]
+        As_mm2 = bolt_data["As_threaded_mm2"]  # threaded for shear only
+        fub = bolt_data["fub_N_per_mm2"]
 
     # ── Check 1: Bolt tension (EC3 Cl 3.6.1) ──────────────────────────────────
     # PE report uses ULS design moment M_Ed directly (page 10, confirmed P105 T2).
     T_total_kN = M_Ed_kNm * 1000 / Ds_mm
     Ft_per_bolt_kN = T_total_kN / n_tension
-    # FT_Rd uses nominal shank area — confirmed P105 T2 PE methodology
-    FT_Rd_kN = 0.9 * fub * As_nominal_mm2 / gamma_M2 / 1000
+    # Dynamic path: threaded stress area per EC3-1-8 Table 3.4.
+    # Config path:  nominal shank area per P105 T2 PE methodology (Han Engineering 8/6/2023).
+    As_tension = As_mm2 if derived else As_nominal_mm2
+    FT_Rd_kN = 0.9 * fub * As_tension / gamma_M2 / 1000
     UR_bolt_tension = Ft_per_bolt_kN / FT_Rd_kN
 
     # ── Check 2: Bolt shear (EC3 Cl 3.6.1) ───────────────────────────────────
     Fv_per_bolt_kN = V_Ed_kN / n_shear
     alpha_v = 0.6
-    Fv_Rd_kN = alpha_v * fub * As_mm2 / gamma_M2 / 1000   # threaded area — conservative
+    Fv_Rd_kN = alpha_v * fub * As_mm2 / gamma_M2 / 1000   # threaded area both paths
     UR_bolt_shear = Fv_per_bolt_kN / Fv_Rd_kN
 
     # ── Check 2b: Bolt bearing (EC3-1-8 Table 3.4) ───────────────────────────
@@ -356,11 +373,15 @@ def compute_connection(
             "FT_Rd_kN": round(FT_Rd_kN, 2),
             "UR": round(UR_bolt_tension, 3),
             "pass": UR_bolt_tension < 1.0,
+            "bolt_As_mm2": round(As_tension, 1),
+            "bolt_As_type": "threaded" if derived else "nominal",
+            "bolt_fub_N_per_mm2": fub,
             "FT_Rd_note": (
-                "Nominal shank area used per P105 T2 PE methodology "
-                "(confirmed from calculation report Han Engineering 8/6/2023). "
-                "EC3-1-8 Table 3.4 specifies tensile stress area — "
-                "this is a known PE methodology difference."
+                "Threaded stress area per EC3-1-8 Table 3.4 and ISO 898-1."
+                if derived else
+                "Nominal shank area per P105 T2 PE methodology (Han Engineering 8/6/2023). "
+                "EC3-1-8 Table 3.4 specifies threaded area — "
+                "this is a known PE methodology difference retained for config path only."
             ),
         },
         "bolt_shear": {
@@ -512,14 +533,16 @@ if __name__ == "__main__":
     print(_json.dumps(rb, indent=2))
     print("\n--- P105 T2 Connection Validation (Han Engineering 8/6/2023) ---")
     print(f"Ft_per_bolt:   {rb['bolt_tension']['Ft_per_bolt_kN']:.2f} kN  (target: 96.53)")
-    print(f"FT_Rd:         {rb['bolt_tension']['FT_Rd_kN']:.2f} kN  (target: 260.58)")
-    print(f"UR_tension:    {rb['bolt_tension']['UR']:.3f}       (target: 0.370)")
+    # FT_Rd: PE used pi/4*24^2=452.39mm² (continuous); ISO 898-1 table gives 452mm².
+    # Delta: 0.9*800*(452.39-452)/1.25/1000 = 0.22kN — acceptable rounding difference.
+    print(f"FT_Rd:         {rb['bolt_tension']['FT_Rd_kN']:.2f} kN  (target: 260.35 via ISO 898-1 As=452mm²; PE calc 260.58 via pi/4*d²=452.39mm²)")
+    print(f"UR_tension:    {rb['bolt_tension']['UR']:.3f}       (target: 0.371 via ISO 898-1; PE calc 0.370)")
     print(f"UR_embedment:  {rb['bolt_embedment']['UR']:.3f}       (target: 0.731)")
     print(f"G clamp n:     {rb['g_clamp']['n_clamps']}  (target: 5)")
     print(f"G clamp UR:    {rb['g_clamp']['UR']:.3f}       (target: 0.069)")
     assert abs(rb["bolt_tension"]["Ft_per_bolt_kN"] - 96.53) < 0.01, "Ft_per_bolt mismatch"
-    assert abs(rb["bolt_tension"]["FT_Rd_kN"] - 260.58) < 0.01, "FT_Rd mismatch"
-    assert abs(rb["bolt_tension"]["UR"] - 0.370) < 0.001, "UR_tension mismatch"
+    assert abs(rb["bolt_tension"]["FT_Rd_kN"] - 260.35) < 0.01, "FT_Rd mismatch (ISO 898-1 As=452mm²)"
+    assert abs(rb["bolt_tension"]["UR"] - 0.371) < 0.001, "UR_tension mismatch"
     assert abs(rb["bolt_embedment"]["UR"] - 0.731) < 0.001, "UR_embedment mismatch"
     assert rb["g_clamp"]["n_clamps"] == 5, "n_clamps mismatch"
     assert abs(rb["g_clamp"]["UR"] - 0.069) < 0.001, f"UR_gclamp mismatch: got {rb['g_clamp']['UR']:.3f}"

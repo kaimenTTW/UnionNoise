@@ -373,9 +373,21 @@ function buildWindRows(
     })
   }
   rows.push(
+    ...(wind.terrain_category != null ? [{
+      label: 'Terrain category',
+      expr: `Category ${wind.terrain_category}`,
+      result: `z0 = ${wind.z0_m} m, zmin = ${wind.zmin_m} m`,
+      clause: 'EC1 Cl 4.3.2',
+    }] : []),
+    ...(wind.ze_effective_m != null ? [{
+      label: 'Reference height',
+      expr: `ze = max(${wind.ze_m}, zmin)`,
+      result: `${wind.ze_effective_m} m`,
+      clause: 'EC1 Cl 4.3.2',
+    }] : []),
     {
       label: 'Roughness factor',
-      expr: `cr = 0.19 × ln(${wind.ze_m}/0.05)`,
+      expr: `cr = 0.19 × ln(${wind.ze_effective_m ?? wind.ze_m}/${wind.z0_m ?? 0.05})`,
       result: String(wind.cr),
       clause: 'EC1 Cl 4.3.2',
     },
@@ -387,7 +399,7 @@ function buildWindRows(
     },
     {
       label: 'Turbulence intensity',
-      expr: `Iv = 1.0 / ln(${wind.ze_m}/0.05)`,
+      expr: `Iv = 1.0 / ln(${wind.ze_effective_m ?? wind.ze_m}/${wind.z0_m ?? 0.05})`,
       result: String(wind.Iv),
       clause: 'EC1 Cl 4.4',
     },
@@ -1420,7 +1432,7 @@ export default function Step3() {
 
   // Auto-clear Phase 1 + Phase 2 results when wind/post params change.
   // Foundation param changes deliberately excluded — they don't affect Phase 1.
-  const clearTrigger = `${dp.post_spacing}|${dp.connection_type}|${dp.post_length.effective}|${dp.subframe_spacing}|${structureHeight}|${dp.return_period}|${dp.vb.effective}|${dp.shelter_factor.effective}|${dp.cp_net}|${dp.cp_net_mode}|${dp.barrier_length_m}|${dp.has_return_corners}`
+  const clearTrigger = `${dp.post_spacing}|${dp.connection_type}|${dp.post_length.effective}|${dp.subframe_spacing}|${structureHeight}|${dp.return_period}|${dp.vb.effective}|${dp.shelter_factor.effective}|${dp.cp_net}|${dp.cp_net_mode}|${dp.barrier_length_m}|${dp.has_return_corners}|${dp.terrain_category}`
   useEffect(() => {
     if (confirmed_section || phase1_result || calculation_results) {
       setConfirmedSection(null)
@@ -1459,6 +1471,7 @@ export default function Step3() {
       shelter_factor: dp.shelter_factor.override ?? (computedShelterFactor ?? dp.shelter_factor.calculated),
       vb: dp.vb.override !== null ? dp.vb.effective : undefined,
       return_period: dp.return_period,
+      terrain_category: dp.terrain_category ?? 'II',
       cp_net: computedCpNet,
       barrier_length_m: dp.barrier_length_m ?? null,
       has_return_corners: dp.has_return_corners ?? false,
@@ -1669,6 +1682,20 @@ export default function Step3() {
                 readOnly
                 tabIndex={-1}
               />
+            </Field>
+
+            <Field label="Terrain category" hint="EC1-1-4 Cl 4.3.2 — roughness of upwind terrain. Affects cr and qp." span>
+              <select
+                className="field-input"
+                value={dp.terrain_category ?? 'II'}
+                onChange={(e) => set({ terrain_category: e.target.value as DesignParameters['terrain_category'] })}
+              >
+                <option value="0">Category 0 — Open sea, coastal exposed to open sea (z0=0.003m)</option>
+                <option value="I">Category I — Open flat country, lakes, negligible vegetation (z0=0.01m)</option>
+                <option value="II">Category II — Low vegetation, isolated obstacles, suburban roads (z0=0.05m) — default</option>
+                <option value="III">Category III — Regular vegetation cover, villages, suburban terrain (z0=0.3m)</option>
+                <option value="IV">Category IV — Urban areas, city centres, avg building height &gt;15m (z0=1.0m)</option>
+              </select>
             </Field>
 
             <OverridableField
